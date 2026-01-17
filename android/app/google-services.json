@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "970887669326",
+    "project_id": "mercurio-97408",
+    "storage_bucket": "mercurio-97408.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:970887669326:android:c3c718b7a1fd588eda451f",
+        "android_client_info": {
+          "package_name": "com.mercurio.chat"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyBUURdn1UnvBaSpE75k1gbWRQGIoye5iRs"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
