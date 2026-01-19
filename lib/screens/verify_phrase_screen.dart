@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:mercurio_messenger/screens/home_screen.dart';
+import 'package:mercurio_messenger/services/firebase_messaging_service.dart';
 import 'dart:math';
 
 class VerifyPhraseScreen extends StatefulWidget {
@@ -155,7 +156,7 @@ class _VerifyPhraseScreenState extends State<VerifyPhraseScreen> {
     return _selectedWords.values.every((word) => word != null);
   }
 
-  void _verifyAndContinue() {
+  Future<void> _verifyAndContinue() async {
     final words = widget.correctPhrase.split(' ');
     bool allCorrect = true;
 
@@ -169,13 +170,18 @@ class _VerifyPhraseScreenState extends State<VerifyPhraseScreen> {
     }
 
     if (allCorrect) {
-      // Verification successful - navigate to home
-      Navigator.of(context).pushAndRemoveUntil(
-        MaterialPageRoute(
-          builder: (context) => const HomeScreen(),
-        ),
-        (route) => false,
-      );
+      // Verification successful - initialize Firebase messaging
+      await FirebaseMessagingService().initialize();
+      
+      if (mounted) {
+        // Navigate to home
+        Navigator.of(context).pushAndRemoveUntil(
+          MaterialPageRoute(
+            builder: (context) => const HomeScreen(),
+          ),
+          (route) => false,
+        );
+      }
     } else {
       // Verification failed
       ScaffoldMessenger.of(context).showSnackBar(

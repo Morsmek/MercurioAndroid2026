@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:mercurio_messenger/services/crypto_service.dart';
 import 'package:mercurio_messenger/screens/home_screen.dart';
+import 'package:mercurio_messenger/services/firebase_messaging_service.dart';
 
 class RestoreScreen extends StatefulWidget {
   const RestoreScreen({super.key});
@@ -144,6 +145,9 @@ class _RestoreScreenState extends State<RestoreScreen> {
     try {
       final phrase = _phraseController.text.trim();
       await CryptoService().restoreFromPhrase(phrase);
+
+      // Initialize Firebase messaging after successful restore
+      await FirebaseMessagingService().initialize();
 
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(

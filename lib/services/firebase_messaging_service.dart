@@ -14,16 +14,17 @@ class FirebaseMessagingService {
 
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
   StreamSubscription<QuerySnapshot>? _messageSubscription;
-  final _messageController = StreamController<Message>.broadcast();
+  StreamController<Message>? _messageController;
   bool _isInitialized = false;
   String? _myMercurioId;
 
-  Stream<Message> get messageStream => _messageController.stream;
+  Stream<Message> get messageStream {
+    _messageController ??= StreamController<Message>.broadcast();
+    return _messageController!.stream;
+  }
 
   /// Initialize messaging service
   Future<void> initialize() async {
-    if (_isInitialized) return;
-
     _myMercurioId = await CryptoService().getSessionId();
     
     if (_myMercurioId == null) {
@@ -31,6 +32,14 @@ class FirebaseMessagingService {
         print('⚠️ Cannot initialize Firebase messaging: No Mercurio ID');
       }
       return;
+    }
+
+    // If already initialized with different ID, restart
+    if (_isInitialized) {
+      if (kDebugMode) {
+        print('🔄 Re-initializing Firebase messaging for: $_myMercurioId');
+      }
+      await dispose();
     }
 
     // Listen for real-time messages from Firestore
@@ -178,7 +187,7 @@ class FirebaseMessagingService {
           );
 
           // Notify listeners
-          _messageController.add(message);
+          _messageController?.add(message);
 
           // Update message status to delivered
           await _updateMessageStatus(messageId, 'delivered');
@@ -351,12 +360,20 @@ class FirebaseMessagingService {
   }
 
   /// Dispose service
-  void dispose() {
-    _messageSubscription?.cancel();
-    _messageController.close();
-    _isInitialized = false;
+  Future<void> dispose() async {
+    await _messageSubscription?.cancel();
+    _messageSubscription = null;
     
-    // Set offline status
-    setOnlineStatus(false);
+    if (_messageController != null && !_messageController!.isClosed) {
+      await _messageController!.close();
+      _messageController = null;
+    }
+    
+    _isInitialized = false;
+    _myMercurioId = null;
+    
+    if (kDebugMode) {
+      print('🔌 Firebase Messaging Service disposed');
+    }
   }
 }
