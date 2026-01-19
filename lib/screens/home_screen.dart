@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart';
 import 'package:mercurio_messenger/services/crypto_service.dart';
 import 'package:mercurio_messenger/services/storage_service.dart';
 import 'package:mercurio_messenger/services/firebase_messaging_service.dart';
@@ -201,10 +202,27 @@ class _HomeScreenState extends State<HomeScreen> {
             final contactData = await StorageService().getContact(conversation.contactSessionId);
             if (contactData != null && mounted) {
               final contact = Contact.fromMap(contactData);
+              
+              // CRITICAL FIX: Regenerate the correct conversation ID
+              final mySessionId = await CryptoService().getSessionId();
+              if (mySessionId == null) return;
+              
+              final correctConversationId = _getConversationId(contact.sessionId, mySessionId);
+              
+              // Update conversation with correct ID if needed
+              Conversation conversationToUse = conversation;
+              if (conversation.id != correctConversationId) {
+                if (kDebugMode) {
+                  print('🔧 FIXING conversation ID: ${conversation.id} -> $correctConversationId');
+                }
+                conversationToUse = conversation.copyWith(id: correctConversationId);
+                await StorageService().saveConversation(conversationToUse.toMap());
+              }
+              
               final result = await Navigator.of(context).push(
                 MaterialPageRoute(
                   builder: (context) => ChatScreen(
-                    conversation: conversation,
+                    conversation: conversationToUse,
                     contact: contact,
                   ),
                 ),
@@ -437,5 +455,11 @@ class _HomeScreenState extends State<HomeScreen> {
         ],
       ),
     );
+  }
+  
+  // Generate deterministic conversation ID from two session IDs
+  String _getConversationId(String id1, String id2) {
+    final sortedIds = [id1, id2]..sort();
+    return sortedIds.join('_');
   }
 }

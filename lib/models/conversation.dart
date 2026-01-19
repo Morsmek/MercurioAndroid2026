@@ -58,6 +58,7 @@ class Conversation {
   }
 
   Conversation copyWith({
+    String? id,
     String? contactName,
     String? contactAvatar,
     String? lastMessage,
@@ -68,7 +69,7 @@ class Conversation {
     int? disappearingTimer,
   }) {
     return Conversation(
-      id: id,
+      id: id ?? this.id,
       contactSessionId: contactSessionId,
       contactName: contactName ?? this.contactName,
       contactAvatar: contactAvatar ?? this.contactAvatar,
