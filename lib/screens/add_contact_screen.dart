@@ -6,6 +6,7 @@ import 'package:mercurio_messenger/services/crypto_service.dart';
 import 'package:mercurio_messenger/services/storage_service.dart';
 import 'package:mercurio_messenger/models/contact.dart';
 import 'package:mercurio_messenger/models/conversation.dart';
+import 'package:mercurio_messenger/services/connection_service.dart';
 import 'package:uuid/uuid.dart';
 
 class AddContactScreen extends StatefulWidget {
@@ -228,106 +229,138 @@ class _AddContactScreenState extends State<AddContactScreen> {
       return;
     }
 
+    final mercurioId = _mercurioIdController.text.trim().replaceAll('\n', '').replaceAll(' ', '');
+    final displayName = _displayNameController.text.trim();
+
+    // Check if trying to add yourself
+    final myMercurioId = await CryptoService().getSessionId();
+    if (mercurioId == myMercurioId) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: const Text('You cannot add yourself as a contact'),
+          backgroundColor: Theme.of(context).colorScheme.error,
+        ),
+      );
+      return;
+    }
+
+    // Check if contact already exists
+    final existingContact = await StorageService().getContact(mercurioId);
+    if (existingContact != null) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('This contact already exists!'),
+            backgroundColor: Colors.orange,
+          ),
+        );
+      }
+      return;
+    }
+
+    // Show dialog to request connection
+    await _showConnectionRequestDialog(mercurioId, displayName);
+  }
+
+  Future<void> _showConnectionRequestDialog(String mercurioId, String displayName) async {
+    final messageController = TextEditingController();
+    
+    final result = await showDialog<String>(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => AlertDialog(
+        title: const Text('Request Connection'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              'Tell $displayName who you are in 10 words or less:',
+              style: Theme.of(context).textTheme.bodyMedium,
+            ),
+            const SizedBox(height: 16),
+            TextField(
+              controller: messageController,
+              maxLength: 100,
+              maxLines: 2,
+              decoration: const InputDecoration(
+                hintText: 'e.g., Hey, it\'s John from work!',
+                border: OutlineInputBorder(),
+              ),
+              onChanged: (text) {
+                // Count words
+                final wordCount = text.trim().split(RegExp(r'\s+')).where((w) => w.isNotEmpty).length;
+                if (wordCount > 10) {
+                  // Truncate to 10 words
+                  final words = text.trim().split(RegExp(r'\s+')).take(10).join(' ');
+                  messageController.text = words;
+                  messageController.selection = TextSelection.fromPosition(
+                    TextPosition(offset: words.length),
+                  );
+                }
+              },
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, null),
+            child: const Text('Cancel'),
+          ),
+          ElevatedButton(
+            onPressed: () {
+              final message = messageController.text.trim();
+              if (message.isEmpty) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(content: Text('Please enter a message')),
+                );
+                return;
+              }
+              Navigator.pop(context, message);
+            },
+            child: const Text('Send Request'),
+          ),
+        ],
+      ),
+    );
+
+    if (result == null) return; // User cancelled
+
+    // Send connection request
     setState(() {
       _isAdding = true;
     });
 
     try {
-      final mercurioId = _mercurioIdController.text.trim().replaceAll('\n', '').replaceAll(' ', '');
-      final displayName = _displayNameController.text.trim();
-
-      // Check if contact already exists
-      final existingContact = await StorageService().getContact(mercurioId);
-      if (existingContact != null) {
-        // Contact exists (probably auto-created), just update display name
-        if (kDebugMode) {
-          print('Contact already exists, updating display name');
-        }
-        
-        final updatedContact = Contact(
-          sessionId: mercurioId,
-          displayName: displayName,
-          verified: false,
-          blocked: false,
-        );
-        
-        await StorageService().saveContact(updatedContact.toMap());
-        
-        // Also update conversation name
-        final conversations = await StorageService().getAllConversations();
-        final existingConv = conversations.firstWhere(
-          (conv) => conv['contactSessionId'] == mercurioId,
-          orElse: () => {},
-        );
-        
-        if (existingConv.isNotEmpty) {
-          existingConv['contactName'] = displayName;
-          await StorageService().saveConversation(existingConv);
-        }
-        
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text('Contact name updated to $displayName!'),
-              backgroundColor: Colors.green,
-            ),
-          );
-          Navigator.of(context).pop(true);
-        }
-        return;
-      }
-
-      // Check if trying to add yourself
-      final myMercurioId = await CryptoService().getSessionId();
-      if (mercurioId == myMercurioId) {
-        throw Exception('You cannot add yourself as a contact');
-      }
-
-      // Create contact
-      final contact = Contact(
-        sessionId: mercurioId,
+      await ConnectionService().sendRequest(
+        toSessionId: mercurioId,
+        message: result,
         displayName: displayName,
-        verified: false,
-        blocked: false,
       );
-
-      // Save contact
-      await StorageService().saveContact(contact.toMap());
-
-      // Create conversation with deterministic ID (same as auto-creation)
-      final conversationId = _getConversationId(myMercurioId!, mercurioId);
-      final conversation = Conversation(
-        id: conversationId,
-        contactSessionId: mercurioId,
-        contactName: displayName,
-        unreadCount: 0,
-      );
-
-      await StorageService().saveConversation(conversation.toMap());
 
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('$displayName added successfully!'),
+          const SnackBar(
+            content: Text('Connection request sent!'),
             backgroundColor: Colors.green,
           ),
         );
-
-        // Navigate back
-        Navigator.of(context).pop(true); // Return true to indicate success
+        Navigator.of(context).pop(true);
       }
     } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Error sending request: ${e.toString()}'),
+            backgroundColor: Theme.of(context).colorScheme.error,
+          ),
+        );
+      }
+    } finally {
       if (mounted) {
         setState(() {
           _isAdding = false;
         });
-
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Failed to add contact: ${e.toString()}'),
-            backgroundColor: Theme.of(context).colorScheme.error,
-          ),
-        );
       }
     }
   }

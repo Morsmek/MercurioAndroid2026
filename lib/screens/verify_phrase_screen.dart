@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:mercurio_messenger/screens/home_screen.dart';
 import 'package:mercurio_messenger/services/firebase_messaging_service.dart';
+import 'package:mercurio_messenger/services/connection_service.dart';
 import 'dart:math';
 
 class VerifyPhraseScreen extends StatefulWidget {
@@ -170,8 +171,9 @@ class _VerifyPhraseScreenState extends State<VerifyPhraseScreen> {
     }
 
     if (allCorrect) {
-      // Verification successful - initialize Firebase messaging
+      // Verification successful - initialize Firebase messaging and connection service
       await FirebaseMessagingService().initialize();
+      await ConnectionService().initialize();
       
       if (mounted) {
         // Navigate to home

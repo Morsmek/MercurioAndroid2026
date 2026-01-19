@@ -3,6 +3,8 @@ import 'package:flutter/foundation.dart';
 import 'package:mercurio_messenger/services/crypto_service.dart';
 import 'package:mercurio_messenger/services/storage_service.dart';
 import 'package:mercurio_messenger/services/firebase_messaging_service.dart';
+import 'package:mercurio_messenger/services/connection_service.dart';
+import 'package:mercurio_messenger/models/connection_request.dart';
 import 'package:mercurio_messenger/models/conversation.dart';
 import 'package:mercurio_messenger/models/contact.dart';
 import 'package:mercurio_messenger/screens/add_contact_screen.dart';
@@ -22,17 +24,20 @@ class _HomeScreenState extends State<HomeScreen> {
   String? _sessionId;
   List<Conversation> _conversations = [];
   StreamSubscription? _messageSubscription;
+  StreamSubscription? _requestSubscription;
 
   @override
   void initState() {
     super.initState();
     _loadData();
     _setupMessageListener();
+    _setupConnectionRequestListener();
   }
 
   @override
   void dispose() {
     _messageSubscription?.cancel();
+    _requestSubscription?.cancel();
     super.dispose();
   }
 
@@ -40,6 +45,15 @@ class _HomeScreenState extends State<HomeScreen> {
     // Listen for new messages and refresh conversation list
     _messageSubscription = FirebaseMessagingService().messageStream.listen((_) {
       _loadData();
+    });
+  }
+
+  void _setupConnectionRequestListener() {
+    // Listen for incoming connection requests
+    _requestSubscription = ConnectionService().requestStream.listen((request) {
+      if (mounted) {
+        _showConnectionRequestDialog(request);
+      }
     });
   }
 
@@ -461,5 +475,118 @@ class _HomeScreenState extends State<HomeScreen> {
   String _getConversationId(String id1, String id2) {
     final sortedIds = [id1, id2]..sort();
     return sortedIds.join('_');
+  }
+
+  Future<void> _showConnectionRequestDialog(ConnectionRequest request) async {
+    final nameController = TextEditingController();
+    
+    final result = await showDialog<String>(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => AlertDialog(
+        title: const Text('Connection Request Received!'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text('Message from sender:', style: TextStyle(fontWeight: FontWeight.bold)),
+            const SizedBox(height: 8),
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: Theme.of(context).colorScheme.surface,
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(
+                  color: Theme.of(context).colorScheme.primary.withValues(alpha: 0.3),
+                ),
+              ),
+              child: Text(
+                request.message,
+                style: Theme.of(context).textTheme.bodyLarge,
+              ),
+            ),
+            const SizedBox(height: 16),
+            const Text('Give them a display name:', style: TextStyle(fontSize: 12)),
+            const SizedBox(height: 8),
+            TextField(
+              controller: nameController,
+              decoration: InputDecoration(
+                hintText: 'e.g., John from work',
+                border: const OutlineInputBorder(),
+                contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, null),
+            style: TextButton.styleFrom(
+              foregroundColor: Theme.of(context).colorScheme.error,
+            ),
+            child: const Text('Deny'),
+          ),
+          ElevatedButton(
+            onPressed: () {
+              final name = nameController.text.trim();
+              if (name.isEmpty) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(content: Text('Please enter a display name')),
+                );
+                return;
+              }
+              Navigator.pop(context, name);
+            },
+            child: const Text('Accept'),
+          ),
+        ],
+      ),
+    );
+
+    if (result != null && result.isNotEmpty) {
+      // Accept request with display name
+      try {
+        await ConnectionService().acceptRequest(request, result);
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('$result added as contact!'),
+              backgroundColor: Colors.green,
+            ),
+          );
+          _loadData(); // Refresh to show new contact
+        }
+      } catch (e) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('Error accepting: ${e.toString()}'),
+              backgroundColor: Theme.of(context).colorScheme.error,
+            ),
+          );
+        }
+      }
+    } else if (result == null) {
+      // Deny request
+      try {
+        await ConnectionService().denyRequest(request);
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('Connection denied'),
+            ),
+          );
+        }
+      } catch (e) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('Error denying: ${e.toString()}'),
+              backgroundColor: Theme.of(context).colorScheme.error,
+            ),
+          );
+        }
+      }
+    }
   }
 }
