@@ -68,8 +68,8 @@ class CryptoService {
       debugPrint('📝 Step 3: Generating RSA-2048 keypair...');
     }
     final rsaKeyPair = await generateRSAKeyPair();
-    final rsaPublicKey = rsaKeyPair.publicKey as pc.RSAPublicKey;
-    final rsaPrivateKey = rsaKeyPair.privateKey as pc.RSAPrivateKey;
+    final rsaPublicKey = rsaKeyPair.publicKey;
+    final rsaPrivateKey = rsaKeyPair.privateKey;
     if (kDebugMode) {
       debugPrint('✅ RSA keypair generated');
     }
@@ -343,7 +343,15 @@ class CryptoService {
       );
       
       final keyPair = keyGen.generateKeyPair();
-      return keyPair as pc.AsymmetricKeyPair<pc.RSAPublicKey, pc.RSAPrivateKey>;
+      
+      // Properly extract and return typed keypair
+      final publicKey = keyPair.publicKey as pc.RSAPublicKey;
+      final privateKey = keyPair.privateKey as pc.RSAPrivateKey;
+      
+      return pc.AsymmetricKeyPair<pc.RSAPublicKey, pc.RSAPrivateKey>(
+        publicKey,
+        privateKey,
+      );
     });
   }
 
@@ -421,8 +429,8 @@ class CryptoService {
     
     // Generate new RSA keypair (can't restore from phrase)
     final rsaKeyPair = await generateRSAKeyPair();
-    final rsaPublicKey = rsaKeyPair.publicKey as pc.RSAPublicKey;
-    final rsaPrivateKey = rsaKeyPair.privateKey as pc.RSAPrivateKey;
+    final rsaPublicKey = rsaKeyPair.publicKey;
+    final rsaPrivateKey = rsaKeyPair.privateKey;
     
     // Store restored identity
     await _secureStorage.write(
