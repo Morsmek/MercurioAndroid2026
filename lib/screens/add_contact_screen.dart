@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
 import 'package:mercurio_messenger/services/crypto_service.dart';
@@ -238,7 +239,42 @@ class _AddContactScreenState extends State<AddContactScreen> {
       // Check if contact already exists
       final existingContact = await StorageService().getContact(mercurioId);
       if (existingContact != null) {
-        throw Exception('Contact already exists');
+        // Contact exists (probably auto-created), just update display name
+        if (kDebugMode) {
+          print('Contact already exists, updating display name');
+        }
+        
+        final updatedContact = Contact(
+          sessionId: mercurioId,
+          displayName: displayName,
+          verified: false,
+          blocked: false,
+        );
+        
+        await StorageService().saveContact(updatedContact.toMap());
+        
+        // Also update conversation name
+        final conversations = await StorageService().getAllConversations();
+        final existingConv = conversations.firstWhere(
+          (conv) => conv['contactSessionId'] == mercurioId,
+          orElse: () => {},
+        );
+        
+        if (existingConv.isNotEmpty) {
+          existingConv['contactName'] = displayName;
+          await StorageService().saveConversation(existingConv);
+        }
+        
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('Contact name updated to $displayName!'),
+              backgroundColor: Colors.green,
+            ),
+          );
+          Navigator.of(context).pop(true);
+        }
+        return;
       }
 
       // Check if trying to add yourself
@@ -258,9 +294,10 @@ class _AddContactScreenState extends State<AddContactScreen> {
       // Save contact
       await StorageService().saveContact(contact.toMap());
 
-      // Create conversation
+      // Create conversation with deterministic ID (same as auto-creation)
+      final conversationId = _getConversationId(myMercurioId!, mercurioId);
       final conversation = Conversation(
-        id: const Uuid().v4(),
+        id: conversationId,
         contactSessionId: mercurioId,
         contactName: displayName,
         unreadCount: 0,
@@ -293,5 +330,11 @@ class _AddContactScreenState extends State<AddContactScreen> {
         );
       }
     }
+  }
+
+  /// Generate deterministic conversation ID from two session IDs
+  String _getConversationId(String id1, String id2) {
+    final sortedIds = [id1, id2]..sort();
+    return '${sortedIds[0]}_${sortedIds[1]}';
   }
 }
