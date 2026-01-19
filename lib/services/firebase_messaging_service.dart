@@ -60,22 +60,40 @@ class FirebaseMessagingService {
 
     try {
       final publicKey = await CryptoService().getPublicKeyString();
+      final userDoc = _firestore.collection('users').doc(_myMercurioId);
       
-      await _firestore.collection('users').doc(_myMercurioId).set({
-        'mercurio_id': _myMercurioId,
-        'public_key': publicKey,
-        'last_seen': FieldValue.serverTimestamp(),
-        'is_online': true,
-        'created_at': FieldValue.serverTimestamp(),
-      }, SetOptions(merge: true));
-
-      if (kDebugMode) {
-        print('✅ User registered in Firestore');
+      // Check if user document already exists
+      final docSnapshot = await userDoc.get();
+      
+      if (!docSnapshot.exists) {
+        // CREATE: First time registration - include created_at
+        await userDoc.set({
+          'mercurio_id': _myMercurioId,
+          'public_key': publicKey,
+          'created_at': FieldValue.serverTimestamp(),
+          'last_seen': FieldValue.serverTimestamp(),
+          'is_online': true,
+        });
+        
+        if (kDebugMode) {
+          print('✅ User created in Firestore: $_myMercurioId');
+        }
+      } else {
+        // UPDATE: Update only last_seen and is_online (don't change mercurio_id or public_key)
+        await userDoc.update({
+          'last_seen': FieldValue.serverTimestamp(),
+          'is_online': true,
+        });
+        
+        if (kDebugMode) {
+          print('✅ User status updated in Firestore: $_myMercurioId');
+        }
       }
     } catch (e) {
       if (kDebugMode) {
         print('❌ Error registering user: $e');
       }
+      rethrow; // Re-throw to see the actual error in logs
     }
   }
 
