@@ -284,24 +284,62 @@ class FirebaseMessagingService {
       orElse: () => {},
     );
 
+    String conversationId;
+
     if (existingConversation.isEmpty) {
+      // NEW: Auto-create contact and conversation for unknown sender
       if (kDebugMode) {
-        print('⚠️ Received message from unknown contact: $senderMercurioId');
+        print('📬 Received message from unknown contact: $senderMercurioId');
+        print('   Creating contact and conversation automatically...');
       }
-      return;
+
+      // Create contact with Session ID as display name (user can rename later)
+      final newContact = {
+        'sessionId': senderMercurioId,
+        'displayName': 'User ${senderMercurioId.substring(0, 8)}...',
+        'verified': false,
+        'blocked': false,
+        'addedTimestamp': DateTime.now().millisecondsSinceEpoch,
+      };
+      
+      await StorageService().saveContact(newContact);
+      
+      if (kDebugMode) {
+        print('   ✅ Contact created');
+      }
+
+      // Create conversation
+      conversationId = _getConversationId(senderMercurioId, _myMercurioId!);
+      final newConversation = {
+        'id': conversationId,
+        'contactSessionId': senderMercurioId,
+        'contactName': newContact['displayName'],
+        'lastMessage': message.content.length > 50 
+            ? '${message.content.substring(0, 50)}...' 
+            : message.content,
+        'lastMessageTimestamp': message.timestamp.millisecondsSinceEpoch,
+        'unreadCount': 1,
+      };
+      
+      await StorageService().saveConversation(newConversation);
+      
+      if (kDebugMode) {
+        print('   ✅ Conversation created with ID: $conversationId');
+      }
+    } else {
+      // Existing conversation - just update it
+      conversationId = existingConversation['id'] as String;
+      final updatedConversation = {
+        ...existingConversation,
+        'lastMessage': message.content.length > 50 
+            ? '${message.content.substring(0, 50)}...' 
+            : message.content,
+        'lastMessageTimestamp': message.timestamp.millisecondsSinceEpoch,
+        'unreadCount': (existingConversation['unreadCount'] as int? ?? 0) + 1,
+      };
+
+      await StorageService().saveConversation(updatedConversation);
     }
-
-    final conversationId = existingConversation['id'] as String;
-    final updatedConversation = {
-      ...existingConversation,
-      'lastMessage': message.content.length > 50 
-          ? '${message.content.substring(0, 50)}...' 
-          : message.content,
-      'lastMessageTimestamp': message.timestamp.millisecondsSinceEpoch,
-      'unreadCount': (existingConversation['unreadCount'] as int? ?? 0) + 1,
-    };
-
-    await StorageService().saveConversation(updatedConversation);
   }
 
   /// Mark message as read
