@@ -75,30 +75,45 @@ class FirebaseMessagingService {
     if (_myMercurioId == null) return;
 
     // Listen for messages where we are the recipient
+    // Note: Removed orderBy to avoid needing composite index
+    // Firestore snapshots() will still deliver new messages in real-time
     _messageSubscription = _firestore
         .collection('messages')
         .where('recipient_id', isEqualTo: _myMercurioId)
-        .orderBy('timestamp', descending: true)
-        .limit(50)
         .snapshots()
         .listen((snapshot) {
       _handleNewMessages(snapshot);
+    }, onError: (error) {
+      if (kDebugMode) {
+        print('❌ Error listening for messages: $error');
+      }
     });
 
     if (kDebugMode) {
-      print('👂 Listening for real-time messages...');
+      print('👂 Listening for real-time messages for: $_myMercurioId');
     }
   }
 
   /// Handle incoming messages (with E2EE decryption)
   Future<void> _handleNewMessages(QuerySnapshot snapshot) async {
+    if (kDebugMode) {
+      print('📬 Received ${snapshot.docChanges.length} message changes');
+    }
+
     for (final change in snapshot.docChanges) {
       if (change.type == DocumentChangeType.added) {
         try {
           final data = change.doc.data() as Map<String, dynamic>;
+          final messageId = change.doc.id;
+          
+          if (kDebugMode) {
+            print('📥 Processing new message:');
+            print('   ID: $messageId');
+            print('   From: ${data['sender_id']}');
+            print('   To: ${data['recipient_id']}');
+          }
           
           // Check if we already have this message locally
-          final messageId = change.doc.id;
           final conversationId = _getConversationId(
             data['sender_id'] as String,
             _myMercurioId!,
@@ -107,56 +122,69 @@ class FirebaseMessagingService {
           final existingMessages = await StorageService().getMessages(conversationId);
           final messageExists = existingMessages.any((msg) => msg['id'] == messageId);
 
-          if (!messageExists) {
-            // 🔓 DECRYPT MESSAGE WITH E2EE
-            String decryptedContent;
-            try {
-              final encryptedData = {
-                'encrypted_content': data['encrypted_content'] as String,
-                'encrypted_aes_key': data['encrypted_aes_key'] as String,
-                'nonce': data['nonce'] as String,
-                'mac': data['mac'] as String,
-              };
-              
-              decryptedContent = await CryptoService().decryptMessageFromSender(encryptedData);
-              
-              if (kDebugMode) {
-                print('🔓 Message decrypted with E2EE');
-              }
-            } catch (e) {
-              if (kDebugMode) {
-                print('❌ Failed to decrypt message: $e');
-              }
-              decryptedContent = '[Encrypted message - decryption failed]';
-            }
-            
-            // New message - save locally with DECRYPTED content
-            final message = Message(
-              id: messageId,
-              conversationId: conversationId,
-              senderSessionId: data['sender_id'] as String,
-              content: decryptedContent,
-              timestamp: (data['timestamp'] as Timestamp).toDate(),
-              status: MessageStatus.delivered,
-            );
-
-            await StorageService().saveMessage(message.toMap());
-            
-            // Update conversation
-            await _updateConversationWithNewMessage(
-              message,
-              data['sender_id'] as String,
-            );
-
-            // Notify listeners
-            _messageController.add(message);
-
-            // Update message status to delivered
-            await _updateMessageStatus(messageId, 'delivered');
-
+          if (messageExists) {
             if (kDebugMode) {
-              print('📥 New encrypted message received and decrypted');
+              print('   ⏭️ Message already exists locally, skipping');
             }
+            continue;
+          }
+
+          if (kDebugMode) {
+            print('   🔓 Decrypting message...');
+          }
+
+          // 🔓 DECRYPT MESSAGE WITH E2EE
+          String decryptedContent;
+          try {
+            final encryptedData = {
+              'encrypted_content': data['encrypted_content'] as String,
+              'encrypted_aes_key': data['encrypted_aes_key'] as String,
+              'nonce': data['nonce'] as String,
+              'mac': data['mac'] as String,
+            };
+            
+            decryptedContent = await CryptoService().decryptMessageFromSender(encryptedData);
+            
+            if (kDebugMode) {
+              print('   ✅ Message decrypted successfully');
+            }
+          } catch (e) {
+            if (kDebugMode) {
+              print('   ❌ Failed to decrypt message: $e');
+            }
+            decryptedContent = '[Encrypted message - decryption failed]';
+          }
+          
+          // New message - save locally with DECRYPTED content
+          final message = Message(
+            id: messageId,
+            conversationId: conversationId,
+            senderSessionId: data['sender_id'] as String,
+            content: decryptedContent,
+            timestamp: (data['timestamp'] as Timestamp?)?.toDate() ?? DateTime.now(),
+            status: MessageStatus.delivered,
+          );
+
+          await StorageService().saveMessage(message.toMap());
+          
+          if (kDebugMode) {
+            print('   💾 Message saved locally');
+          }
+          
+          // Update conversation
+          await _updateConversationWithNewMessage(
+            message,
+            data['sender_id'] as String,
+          );
+
+          // Notify listeners
+          _messageController.add(message);
+
+          // Update message status to delivered
+          await _updateMessageStatus(messageId, 'delivered');
+
+          if (kDebugMode) {
+            print('   ✅ Message processing complete');
           }
         } catch (e) {
           if (kDebugMode) {
@@ -170,6 +198,10 @@ class FirebaseMessagingService {
   /// Send message to recipient (with E2EE)
   Future<void> sendMessage(Message message, String recipientMercurioId) async {
     try {
+      if (kDebugMode) {
+        print('📤 Sending message from $_myMercurioId to $recipientMercurioId');
+      }
+
       // 🔐 ENCRYPT MESSAGE WITH E2EE
       final encryptedData = await CryptoService().encryptMessageForRecipient(
         message.content,
@@ -181,7 +213,7 @@ class FirebaseMessagingService {
       }
 
       // Upload ENCRYPTED message to Firestore
-      await _firestore.collection('messages').add({
+      final docRef = await _firestore.collection('messages').add({
         'sender_id': _myMercurioId,
         'recipient_id': recipientMercurioId,
         'encrypted_content': encryptedData['encrypted_content']!,
@@ -194,7 +226,9 @@ class FirebaseMessagingService {
       });
 
       if (kDebugMode) {
-        print('📤 Encrypted message sent to Firebase');
+        print('📤 Encrypted message sent to Firebase with ID: ${docRef.id}');
+        print('   From: $_myMercurioId');
+        print('   To: $recipientMercurioId');
       }
 
       // Update local message status
