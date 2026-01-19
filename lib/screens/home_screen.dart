@@ -23,6 +23,9 @@ class _HomeScreenState extends State<HomeScreen> {
   int _currentIndex = 0;
   String? _sessionId;
   List<Conversation> _conversations = [];
+  List<Conversation> _filteredConversations = [];
+  bool _isSearching = false;
+  final _searchController = TextEditingController();
   StreamSubscription? _messageSubscription;
   StreamSubscription? _requestSubscription;
 
@@ -36,6 +39,7 @@ class _HomeScreenState extends State<HomeScreen> {
 
   @override
   void dispose() {
+    _searchController.dispose();
     _messageSubscription?.cancel();
     _requestSubscription?.cancel();
     super.dispose();
@@ -60,12 +64,26 @@ class _HomeScreenState extends State<HomeScreen> {
   Future<void> _loadData() async {
     final sessionId = await CryptoService().getSessionId();
     final conversationsData = await StorageService().getAllConversations();
-    
+
     setState(() {
       _sessionId = sessionId;
       _conversations = conversationsData
           .map((data) => Conversation.fromMap(data))
           .toList();
+      _filteredConversations = _conversations;
+    });
+  }
+
+  void _filterConversations(String query) {
+    setState(() {
+      if (query.isEmpty) {
+        _filteredConversations = _conversations;
+      } else {
+        _filteredConversations = _conversations.where((conv) {
+          return conv.contactName.toLowerCase().contains(query.toLowerCase()) ||
+              (conv.lastMessage ?? '').toLowerCase().contains(query.toLowerCase());
+        }).toList();
+      }
     });
   }
 
@@ -73,14 +91,40 @@ class _HomeScreenState extends State<HomeScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Mercurio'),
+        title: _isSearching
+            ? TextField(
+                controller: _searchController,
+                autofocus: true,
+                decoration: const InputDecoration(
+                  hintText: 'Search conversations...',
+                  border: InputBorder.none,
+                  hintStyle: TextStyle(color: Colors.grey),
+                ),
+                style: const TextStyle(color: Colors.white),
+                onChanged: _filterConversations,
+              )
+            : const Text('Mercurio'),
         actions: [
-          IconButton(
-            icon: const Icon(Icons.search),
-            onPressed: () {
-              // TODO: Implement search
-            },
-          ),
+          if (_isSearching)
+            IconButton(
+              icon: const Icon(Icons.close),
+              onPressed: () {
+                setState(() {
+                  _isSearching = false;
+                  _searchController.clear();
+                  _filteredConversations = _conversations;
+                });
+              },
+            )
+          else
+            IconButton(
+              icon: const Icon(Icons.search),
+              onPressed: () {
+                setState(() {
+                  _isSearching = true;
+                });
+              },
+            ),
         ],
       ),
       body: _buildBody(),
@@ -140,7 +184,7 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Widget _buildConversationsList() {
-    if (_conversations.isEmpty) {
+    if (_filteredConversations.isEmpty && !_isSearching) {
       return Center(
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
@@ -165,10 +209,35 @@ class _HomeScreenState extends State<HomeScreen> {
       );
     }
 
+    if (_filteredConversations.isEmpty && _isSearching) {
+      return Center(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(
+              Icons.search_off,
+              size: 80,
+              color: Theme.of(context).colorScheme.primary.withValues(alpha: 0.5),
+            ),
+            const SizedBox(height: 16),
+            Text(
+              'No conversations found',
+              style: Theme.of(context).textTheme.bodyLarge,
+            ),
+            const SizedBox(height: 8),
+            Text(
+              'Try a different search term',
+              style: Theme.of(context).textTheme.bodyMedium,
+            ),
+          ],
+        ),
+      );
+    }
+
     return ListView.builder(
-      itemCount: _conversations.length,
+      itemCount: _filteredConversations.length,
       itemBuilder: (context, index) {
-        final conversation = _conversations[index];
+        final conversation = _filteredConversations[index];
         return ListTile(
           leading: CircleAvatar(
             backgroundColor: Theme.of(context).colorScheme.primary,
@@ -485,12 +554,39 @@ class _HomeScreenState extends State<HomeScreen> {
             child: const Text('Cancel'),
           ),
           TextButton(
-            onPressed: () {
-              // TODO: Implement logout
-              ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(content: Text('Logout feature coming soon')),
-              );
+            onPressed: () async {
               Navigator.pop(context);
+
+              try {
+                await FirebaseMessagingService().setOnlineStatus(false);
+                await FirebaseMessagingService().dispose();
+                await ConnectionService().dispose();
+                await CryptoService().clearAllKeys();
+                await StorageService().clearAllData();
+
+                if (mounted) {
+                  Navigator.of(context).pushNamedAndRemoveUntil(
+                    '/',
+                    (route) => false,
+                  );
+
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(
+                      content: Text('Logged out successfully'),
+                      backgroundColor: Colors.green,
+                    ),
+                  );
+                }
+              } catch (e) {
+                if (mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(
+                      content: Text('Logout error: ${e.toString()}'),
+                      backgroundColor: Theme.of(context).colorScheme.error,
+                    ),
+                  );
+                }
+              }
             },
             child: Text(
               'Logout',

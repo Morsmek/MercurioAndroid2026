@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:mercurio_messenger/services/crypto_service.dart';
 import 'package:mercurio_messenger/services/storage_service.dart';
+import 'package:mercurio_messenger/services/firebase_messaging_service.dart';
+import 'package:mercurio_messenger/services/connection_service.dart';
 import 'package:mercurio_messenger/screens/welcome_screen.dart';
 import 'package:mercurio_messenger/screens/home_screen.dart';
 import 'package:mercurio_messenger/widgets/mercurio_logo.dart';
@@ -20,15 +22,17 @@ class _SplashScreenState extends State<SplashScreen> {
   }
 
   Future<void> _initializeApp() async {
-    // Initialize services
     await StorageService().initialize();
-    
-    // Small delay for splash effect
+
     await Future.delayed(const Duration(seconds: 2));
-    
-    // Check if user has an identity
+
     final hasIdentity = await CryptoService().hasIdentity();
-    
+
+    if (hasIdentity) {
+      await FirebaseMessagingService().initialize();
+      await ConnectionService().initialize();
+    }
+
     if (mounted) {
       Navigator.of(context).pushReplacement(
         MaterialPageRoute(

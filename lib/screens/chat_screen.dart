@@ -8,6 +8,7 @@ import 'package:mercurio_messenger/services/crypto_service.dart';
 import 'package:mercurio_messenger/services/firebase_messaging_service.dart';
 import 'package:mercurio_messenger/utils/theme.dart';
 import 'package:mercurio_messenger/screens/safety_number_screen.dart';
+import 'package:image_picker/image_picker.dart';
 import 'dart:async';
 
 class ChatScreen extends StatefulWidget {
@@ -239,16 +240,9 @@ class _ChatScreenState extends State<ChatScreen> {
             child: SafeArea(
               child: Row(
                 children: [
-                  // Attachment Button (placeholder)
                   IconButton(
-                    icon: const Icon(Icons.attach_file),
-                    onPressed: () {
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        const SnackBar(
-                          content: Text('File attachments coming soon!'),
-                        ),
-                      );
-                    },
+                    icon: const Icon(Icons.image),
+                    onPressed: _pickImage,
                   ),
 
                   // Message Input Field
@@ -499,6 +493,70 @@ class _ChatScreenState extends State<ChatScreen> {
           backgroundColor: Theme.of(context).colorScheme.error,
         ),
       );
+    }
+  }
+
+  Future<void> _pickImage() async {
+    try {
+      final ImagePicker picker = ImagePicker();
+
+      final ImageSource? source = await showDialog<ImageSource>(
+        context: context,
+        builder: (context) => AlertDialog(
+          title: const Text('Choose Image Source'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              ListTile(
+                leading: const Icon(Icons.photo_library),
+                title: const Text('Gallery'),
+                onTap: () => Navigator.pop(context, ImageSource.gallery),
+              ),
+              ListTile(
+                leading: const Icon(Icons.camera_alt),
+                title: const Text('Camera'),
+                onTap: () => Navigator.pop(context, ImageSource.camera),
+              ),
+            ],
+          ),
+        ),
+      );
+
+      if (source == null) return;
+
+      final XFile? image = await picker.pickImage(
+        source: source,
+        maxWidth: 1920,
+        maxHeight: 1080,
+        imageQuality: 85,
+      );
+
+      if (image != null && mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Image selected: ${image.name}'),
+            action: SnackBarAction(
+              label: 'Send',
+              onPressed: () {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(
+                    content: Text('Image sending not fully implemented yet'),
+                  ),
+                );
+              },
+            ),
+          ),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Failed to pick image: $e'),
+            backgroundColor: Theme.of(context).colorScheme.error,
+          ),
+        );
+      }
     }
   }
 
