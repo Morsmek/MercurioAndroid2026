@@ -80,20 +80,21 @@ class ConnectionService {
     final requestId = const Uuid().v4();
 
     // Send to Firestore with proper Timestamp
+    // Note: Don't include 'id' field - the document ID is enough
     await _firestore
         .collection('connection_requests')
         .doc(requestId)
         .set({
-      'id': requestId,
       'fromSessionId': _myMercurioId!,
       'toSessionId': toSessionId,
       'message': message,
-      'timestamp': FieldValue.serverTimestamp(), // Use Firestore server timestamp
+      'timestamp': FieldValue.serverTimestamp(),
       'status': 'pending',
     });
 
     if (kDebugMode) {
       print('📤 Connection request sent to: $toSessionId');
+      print('   Request ID: $requestId');
     }
   }
 
