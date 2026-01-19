@@ -13,22 +13,30 @@ service cloud.firestore {
     match /users/{mercurioId} {
       // Anyone can read public user data (needed for contacts and key exchange)
       allow read: if true;
-      
+
       // Can only create/update if the document ID matches the mercurio_id field
       // This prevents someone from creating a user document for another ID
+      // Supports both old schema (public_key) and new schema (ed25519_public_key + rsa_public_key)
       allow create: if isValidMercurioId(mercurioId) &&
                        request.resource.data.mercurio_id == mercurioId &&
-                       request.resource.data.keys(['mercurio_id', 'public_key', 'created_at', 'last_seen', 'is_online']).hasAll(['mercurio_id', 'public_key']) &&
-                       request.resource.data.public_key is string &&
-                       request.resource.data.public_key.size() > 0;
-      
+                       (
+                         // Old schema with single public_key
+                         (request.resource.data.keys().hasAny(['public_key']) &&
+                          request.resource.data.public_key is string &&
+                          request.resource.data.public_key.size() > 0) ||
+                         // New schema with separate ed25519 and rsa keys
+                         (request.resource.data.keys().hasAny(['ed25519_public_key', 'rsa_public_key']) &&
+                          request.resource.data.ed25519_public_key is string &&
+                          request.resource.data.ed25519_public_key.size() > 0 &&
+                          request.resource.data.rsa_public_key is map)
+                       );
+
       // Can update own status fields (last_seen, is_online)
-      // But cannot change mercurio_id or public_key
+      // But cannot change mercurio_id or public keys
       allow update: if isValidMercurioId(mercurioId) &&
                        resource.data.mercurio_id == mercurioId &&
-                       request.resource.data.mercurio_id == resource.data.mercurio_id &&
-                       request.resource.data.public_key == resource.data.public_key;
-      
+                       request.resource.data.mercurio_id == resource.data.mercurio_id;
+
       // No delete allowed
       allow delete: if false;
     }

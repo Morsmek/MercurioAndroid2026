@@ -349,10 +349,26 @@ class _AddContactScreenState extends State<AddContactScreen> {
       }
     } catch (e) {
       if (mounted) {
+        String errorMessage = 'Error sending request: ${e.toString()}';
+
+        if (e.toString().contains('permission-denied')) {
+          errorMessage = 'Firebase permission denied. Please ensure Firestore security rules are deployed correctly.';
+        } else if (e.toString().contains('not-found')) {
+          errorMessage = 'Contact not found. They may need to register first.';
+        } else if (e.toString().contains('network')) {
+          errorMessage = 'Network error. Please check your internet connection.';
+        }
+
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('Error sending request: ${e.toString()}'),
+            content: Text(errorMessage),
             backgroundColor: Theme.of(context).colorScheme.error,
+            duration: const Duration(seconds: 5),
+            action: SnackBarAction(
+              label: 'Dismiss',
+              textColor: Colors.white,
+              onPressed: () {},
+            ),
           ),
         );
       }

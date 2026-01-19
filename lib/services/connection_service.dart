@@ -79,22 +79,34 @@ class ConnectionService {
 
     final requestId = const Uuid().v4();
 
-    // Send to Firestore with proper Timestamp
-    // Note: Don't include 'id' field - the document ID is enough
-    await _firestore
-        .collection('connection_requests')
-        .doc(requestId)
-        .set({
-      'fromSessionId': _myMercurioId!,
-      'toSessionId': toSessionId,
-      'message': message,
-      'timestamp': FieldValue.serverTimestamp(),
-      'status': 'pending',
-    });
+    try {
+      if (kDebugMode) {
+        print('📤 Sending connection request...');
+        print('   From: $_myMercurioId');
+        print('   To: $toSessionId');
+        print('   Message: $message');
+      }
 
-    if (kDebugMode) {
-      print('📤 Connection request sent to: $toSessionId');
-      print('   Request ID: $requestId');
+      await _firestore
+          .collection('connection_requests')
+          .doc(requestId)
+          .set({
+        'fromSessionId': _myMercurioId!,
+        'toSessionId': toSessionId,
+        'message': message,
+        'timestamp': FieldValue.serverTimestamp(),
+        'status': 'pending',
+      });
+
+      if (kDebugMode) {
+        print('✅ Connection request sent successfully');
+        print('   Request ID: $requestId');
+      }
+    } catch (e) {
+      if (kDebugMode) {
+        print('❌ Error sending connection request: $e');
+      }
+      rethrow;
     }
   }
 
