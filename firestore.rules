@@ -1,0 +1,97 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    
+    // Helper function to check if a Mercurio ID is valid format
+    function isValidMercurioId(id) {
+      return id is string && 
+             id.size() == 66 && 
+             id.matches('^05[0-9a-f]{64}$');
+    }
+    
+    // Users collection - Public profiles with cryptographic identity
+    match /users/{mercurioId} {
+      // Anyone can read public user data (needed for contacts and key exchange)
+      allow read: if true;
+      
+      // Can only create/update if the document ID matches the mercurio_id field
+      // This prevents someone from creating a user document for another ID
+      allow create: if isValidMercurioId(mercurioId) &&
+                       request.resource.data.mercurio_id == mercurioId &&
+                       request.resource.data.keys(['mercurio_id', 'public_key', 'created_at', 'last_seen', 'is_online']).hasAll(['mercurio_id', 'public_key']) &&
+                       request.resource.data.public_key is string &&
+                       request.resource.data.public_key.size() > 0;
+      
+      // Can update own status fields (last_seen, is_online)
+      // But cannot change mercurio_id or public_key
+      allow update: if isValidMercurioId(mercurioId) &&
+                       resource.data.mercurio_id == mercurioId &&
+                       request.resource.data.mercurio_id == resource.data.mercurio_id &&
+                       request.resource.data.public_key == resource.data.public_key;
+      
+      // No delete allowed
+      allow delete: if false;
+    }
+    
+    // Messages collection - End-to-end encrypted messages
+    match /messages/{messageId} {
+      // Anyone can read (messages are E2EE encrypted anyway)
+      // In practice, only the recipient will be listening for their messages
+      allow read: if true;
+      
+      // Can create a message if:
+      // 1. sender_id and recipient_id are valid Mercurio IDs
+      // 2. Message has required encrypted fields
+      // 3. sender_id and recipient_id are different
+      allow create: if isValidMercurioId(request.resource.data.sender_id) &&
+                       isValidMercurioId(request.resource.data.recipient_id) &&
+                       request.resource.data.sender_id != request.resource.data.recipient_id &&
+                       request.resource.data.keys(['sender_id', 'recipient_id', 'encrypted_content', 'encrypted_aes_key', 'nonce', 'timestamp']).hasAll(['sender_id', 'recipient_id', 'encrypted_content', 'encrypted_aes_key', 'nonce', 'timestamp']) &&
+                       request.resource.data.encrypted_content is string &&
+                       request.resource.data.encrypted_aes_key is string &&
+                       request.resource.data.nonce is string &&
+                       request.resource.data.status in ['sent', 'delivered', 'read'];
+      
+      // Can update message status (for delivery/read receipts)
+      // But cannot change the content or sender/recipient
+      allow update: if request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'updated_at']) &&
+                       request.resource.data.status in ['sent', 'delivered', 'read'] &&
+                       request.resource.data.sender_id == resource.data.sender_id &&
+                       request.resource.data.recipient_id == resource.data.recipient_id;
+      
+      // No delete allowed
+      allow delete: if false;
+    }
+    
+    // Connection requests collection
+    match /connection_requests/{requestId} {
+      // Anyone can read their own connection requests
+      // (In practice, users query by toSessionId or fromSessionId)
+      allow read: if true;
+      
+      // Can create a connection request if:
+      // 1. Both session IDs are valid
+      // 2. Request has required fields
+      // 3. From and to are different
+      allow create: if isValidMercurioId(request.resource.data.fromSessionId) &&
+                       isValidMercurioId(request.resource.data.toSessionId) &&
+                       request.resource.data.fromSessionId != request.resource.data.toSessionId &&
+                       request.resource.data.keys(['fromSessionId', 'toSessionId', 'message', 'timestamp', 'status']).hasAll(['fromSessionId', 'toSessionId', 'timestamp', 'status']) &&
+                       request.resource.data.status == 'pending';
+      
+      // Can update status (accept/deny) but cannot change IDs or message
+      allow update: if request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status']) &&
+                       request.resource.data.status in ['accepted', 'denied', 'pending'] &&
+                       request.resource.data.fromSessionId == resource.data.fromSessionId &&
+                       request.resource.data.toSessionId == resource.data.toSessionId;
+      
+      // No delete allowed
+      allow delete: if false;
+    }
+    
+    // Deny all other collections
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}
