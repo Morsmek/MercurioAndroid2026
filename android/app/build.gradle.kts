@@ -8,7 +8,7 @@ plugins {
 
 android {
     namespace = "com.mercurio.chat"
-    compileSdk = 34  // Explicitly set to Android 14
+    compileSdk = 36  // Updated to Android 15 for plugin compatibility
     ndkVersion = flutter.ndkVersion
 
     compileOptions {
@@ -26,7 +26,7 @@ android {
         // You can update the following values to match your application needs.
         // For more information, see: https://flutter.dev/to/review-gradle-config.
         minSdk = 24  // Explicitly set to 24 for compatibility with all dependencies
-        targetSdk = 34  // Latest stable Android version
+        targetSdk = 36  // Updated to Android 15 for plugin compatibility
         versionCode = flutter.versionCode
         versionName = flutter.versionName
         
