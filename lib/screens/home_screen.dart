@@ -286,10 +286,25 @@ class _HomeScreenState extends State<HomeScreen> {
           padding: const EdgeInsets.all(24.0),
           child: Column(
             children: [
-              CircleAvatar(
-                radius: 50,
-                backgroundColor: Theme.of(context).colorScheme.primary,
-                child: const Icon(Icons.person, size: 50, color: Colors.black),
+              Container(
+                width: 100,
+                height: 100,
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  boxShadow: [
+                    BoxShadow(
+                      color: Theme.of(context).colorScheme.primary.withValues(alpha: 0.3),
+                      blurRadius: 20,
+                      spreadRadius: 2,
+                    ),
+                  ],
+                ),
+                child: ClipOval(
+                  child: Image.asset(
+                    'assets/mercurio_logo.png',
+                    fit: BoxFit.cover,
+                  ),
+                ),
               ),
               const SizedBox(height: 16),
               Text(
@@ -427,10 +442,26 @@ class _HomeScreenState extends State<HomeScreen> {
       context: context,
       applicationName: 'Mercurio Messenger',
       applicationVersion: '1.0.0',
-      applicationIcon: Icon(
-        Icons.lock,
-        size: 48,
-        color: Theme.of(context).colorScheme.primary,
+      applicationIcon: Container(
+        width: 64,
+        height: 64,
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(16),
+          boxShadow: [
+            BoxShadow(
+              color: Theme.of(context).colorScheme.primary.withValues(alpha: 0.3),
+              blurRadius: 10,
+              spreadRadius: 1,
+            ),
+          ],
+        ),
+        child: ClipRRect(
+          borderRadius: BorderRadius.circular(16),
+          child: Image.asset(
+            'assets/mercurio_logo.png',
+            fit: BoxFit.cover,
+          ),
+        ),
       ),
       children: const [
         Text('Ultra-secure private messaging with anonymous registration.'),

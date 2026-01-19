@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart';
 import 'package:mercurio_messenger/models/conversation.dart';
 import 'package:mercurio_messenger/models/contact.dart';
 import 'package:mercurio_messenger/models/message.dart';
@@ -82,12 +83,20 @@ class _ChatScreenState extends State<ChatScreen> {
   }
 
   Future<void> _loadMessages() async {
+    if (kDebugMode) {
+      print('📖 Loading messages for conversation: ${widget.conversation.id}');
+    }
+
     setState(() {
       _isLoading = true;
     });
 
     final messagesData = await StorageService().getMessages(widget.conversation.id);
     
+    if (kDebugMode) {
+      print('   Found ${messagesData.length} messages');
+    }
+
     setState(() {
       _messages = messagesData.map((data) => Message.fromMap(data)).toList();
       _isLoading = false;
@@ -420,6 +429,13 @@ class _ChatScreenState extends State<ChatScreen> {
     _messageController.clear();
 
     try {
+      if (kDebugMode) {
+        print('💬 Sending message:');
+        print('   Conversation ID: ${widget.conversation.id}');
+        print('   To: ${widget.contact.sessionId}');
+        print('   Text: $text');
+      }
+
       // Create message
       final message = Message(
         conversationId: widget.conversation.id,
@@ -431,6 +447,10 @@ class _ChatScreenState extends State<ChatScreen> {
 
       // Save message locally first
       await StorageService().saveMessage(message.toMap());
+
+      if (kDebugMode) {
+        print('   💾 Message saved locally');
+      }
 
       // Update conversation
       final updatedConversation = widget.conversation.copyWith(
@@ -460,6 +480,10 @@ class _ChatScreenState extends State<ChatScreen> {
         message,
         widget.contact.sessionId,
       );
+
+      if (kDebugMode) {
+        print('   📤 Message sent to Firebase');
+      }
 
       // Update message status to sent
       final sentMessage = message.copyWith(status: MessageStatus.sent);
