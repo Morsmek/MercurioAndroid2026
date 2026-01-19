@@ -77,18 +77,20 @@ class ConnectionService {
   }) async {
     if (_myMercurioId == null) throw Exception('No session ID');
 
-    final request = ConnectionRequest(
-      id: const Uuid().v4(),
-      fromSessionId: _myMercurioId!,
-      toSessionId: toSessionId,
-      message: message,
-      timestamp: DateTime.now(),
-    );
+    final requestId = const Uuid().v4();
 
+    // Send to Firestore with proper Timestamp
     await _firestore
         .collection('connection_requests')
-        .doc(request.id)
-        .set(request.toMap());
+        .doc(requestId)
+        .set({
+      'id': requestId,
+      'fromSessionId': _myMercurioId!,
+      'toSessionId': toSessionId,
+      'message': message,
+      'timestamp': FieldValue.serverTimestamp(), // Use Firestore server timestamp
+      'status': 'pending',
+    });
 
     if (kDebugMode) {
       print('📤 Connection request sent to: $toSessionId');
