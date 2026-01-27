@@ -1,7 +1,6 @@
 package com.mercurio.chat
 
 import androidx.multidex.MultiDexApplication
-import io.flutter.app.FlutterApplication
 
 class MercurioApplication : MultiDexApplication() {
     override fun onCreate() {
