@@ -8,7 +8,7 @@ plugins {
 
 android {
     namespace = "com.mercurio.chat"
-    compileSdk = 36  // Updated to Android 15 for plugin compatibility
+    compileSdk = 34  // Android 14 - Maximum supported by all Flutter plugins
     ndkVersion = flutter.ndkVersion
 
     compileOptions {
@@ -26,7 +26,7 @@ android {
         // You can update the following values to match your application needs.
         // For more information, see: https://flutter.dev/to/review-gradle-config.
         minSdk = 24  // Explicitly set to 24 for compatibility with all dependencies
-        targetSdk = 36  // Updated to Android 15 for plugin compatibility
+        targetSdk = 34  // Android 14 - Maximum supported by all Flutter plugins
         versionCode = flutter.versionCode
         versionName = flutter.versionName
         
@@ -36,15 +36,16 @@ android {
 
     buildTypes {
         release {
-            // Enable code shrinking and obfuscation
-            isMinifyEnabled = true
-            isShrinkResources = true
+            // Disable code shrinking for initial release to avoid runtime issues
+            // Enable these after thorough testing with ProGuard rules
+            isMinifyEnabled = false
+            isShrinkResources = false
             
-            // Proguard rules
-            proguardFiles(
-                getDefaultProguardFile("proguard-android-optimize.txt"),
-                "proguard-rules.pro"
-            )
+            // Proguard rules (commented out for now)
+            // proguardFiles(
+            //     getDefaultProguardFile("proguard-android-optimize.txt"),
+            //     "proguard-rules.pro"
+            // )
             
             // TODO: Add your own signing config for the release build.
             // Signing with the debug keys for now, so `flutter run --release` works.
