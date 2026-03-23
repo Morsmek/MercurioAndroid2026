@@ -240,6 +240,14 @@ app.get('/api/health', (req, res) => {
   res.json({ status: 'ok', timestamp: new Date().toISOString() });
 });
 
+// Serve APK for download
+app.get('/download/mercurio.apk', (req, res) => {
+  const apkPath = path.join(__dirname, 'mercurio-messenger.apk');
+  res.download(apkPath, 'mercurio-messenger-1.0.0.apk', (err) => {
+    if (err) res.status(404).json({ error: 'APK not found' });
+  });
+});
+
 app.listen(PORT, '0.0.0.0', () => {
   console.log(`Mercurio API server running on http://0.0.0.0:${PORT}`);
 });
