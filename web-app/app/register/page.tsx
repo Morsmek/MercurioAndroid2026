@@ -3,7 +3,7 @@
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { cryptoService } from '@/lib/crypto';
-import { uploadUserPublicKeys } from '@/lib/supabase';
+import { uploadUserPublicKeys } from '@/lib/api';
 
 export default function RegisterPage() {
   const router = useRouter();
@@ -67,20 +67,20 @@ export default function RegisterPage() {
               </svg>
             </div>
             <h1 className="text-3xl font-bold gradient-text mb-2">Recovery Phrase</h1>
-            <p className="text-gray-400">Write down these words in order. This is the ONLY way to recover your account.</p>
+            <p className="text-gray-400">Write down these 12 words in order. This is the ONLY way to recover your account.</p>
           </div>
 
-          <div className="bg-primary/10 border border-primary/30 rounded-xl p-6 mb-6">
-            <p className="text-primary font-semibold mb-2">⚠️ Write down these words</p>
+          <div className="bg-primary/10 border border-primary/30 rounded-xl p-4">
+            <p className="text-primary font-semibold mb-1">⚠️ Write down these words</p>
             <p className="text-sm text-gray-400">
-              Store it safely and never share it with anyone. Without this phrase, you cannot recover your account.
+              Store it safely and never share it with anyone.
             </p>
           </div>
 
-          <div className="grid grid-cols-2 gap-3 mb-6">
+          <div className="grid grid-cols-2 gap-3">
             {words.map((word, index) => (
-              <div key={index} className="flex items-center gap-3 p-4 bg-white/5 rounded-lg">
-                <span className="text-gray-500 text-sm w-8">{index + 1}.</span>
+              <div key={index} className="flex items-center gap-3 p-3 bg-white/5 rounded-lg">
+                <span className="text-gray-500 text-sm w-6 text-right">{index + 1}.</span>
                 <span className="text-white font-medium">{word}</span>
               </div>
             ))}
@@ -109,7 +109,7 @@ export default function RegisterPage() {
             onClick={continueToHome}
             className="w-full py-4 px-6 font-semibold text-black gradient-bg rounded-xl hover:opacity-90 transition-opacity"
           >
-            I've Saved My Recovery Phrase
+            I've Saved My Recovery Phrase →
           </button>
         </div>
       </div>
@@ -129,7 +129,7 @@ export default function RegisterPage() {
           <h1 className="text-3xl font-bold gradient-text mb-4">Create Your Identity</h1>
 
           <p className="text-gray-400 mb-8">
-            Your identity will be created locally in your browser. You'll receive a 12-word recovery phrase to backup your account.
+            Your identity will be created locally. You'll get a 12-word recovery phrase to backup your account.
           </p>
         </div>
 
