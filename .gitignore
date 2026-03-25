@@ -36,3 +36,4 @@ web-app/tsconfig.tsbuildinfo
 web-app/package-lock.json
 server/mercurio.db
 next-env.d.ts
+android/app/mercurio-release.jks
