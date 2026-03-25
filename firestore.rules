@@ -14,28 +14,17 @@ service cloud.firestore {
       // Anyone can read public user data (needed for contacts and key exchange)
       allow read: if true;
 
-      // Can only create/update if the document ID matches the mercurio_id field
-      // This prevents someone from creating a user document for another ID
-      // Supports both old schema (public_key) and new schema (ed25519_public_key + rsa_public_key)
+      // Allow create with any valid key schema
       allow create: if isValidMercurioId(mercurioId) &&
                        request.resource.data.mercurio_id == mercurioId &&
                        (
-                         // Old schema with single public_key
-                         (request.resource.data.keys().hasAny(['public_key']) &&
-                          request.resource.data.public_key is string &&
-                          request.resource.data.public_key.size() > 0) ||
-                         // New schema with separate ed25519 and rsa keys
-                         (request.resource.data.keys().hasAny(['ed25519_public_key', 'rsa_public_key']) &&
-                          request.resource.data.ed25519_public_key is string &&
-                          request.resource.data.ed25519_public_key.size() > 0 &&
-                          request.resource.data.rsa_public_key is map)
+                         request.resource.data.public_key is string ||
+                         request.resource.data.ed25519_public_key is string
                        );
 
-      // Can update own status fields (last_seen, is_online)
-      // But cannot change mercurio_id or public keys
+      // Allow update to own document (status, keys, etc.)
       allow update: if isValidMercurioId(mercurioId) &&
-                       resource.data.mercurio_id == mercurioId &&
-                       request.resource.data.mercurio_id == resource.data.mercurio_id;
+                       resource.data.mercurio_id == mercurioId;
 
       // No delete allowed
       allow delete: if false;
@@ -44,28 +33,20 @@ service cloud.firestore {
     // Messages collection - End-to-end encrypted messages
     match /messages/{messageId} {
       // Anyone can read (messages are E2EE encrypted anyway)
-      // In practice, only the recipient will be listening for their messages
       allow read: if true;
       
-      // Can create a message if:
-      // 1. sender_id and recipient_id are valid Mercurio IDs
-      // 2. Message has required encrypted fields
-      // 3. sender_id and recipient_id are different
+      // Allow creating a message with valid sender/recipient and required fields
       allow create: if isValidMercurioId(request.resource.data.sender_id) &&
                        isValidMercurioId(request.resource.data.recipient_id) &&
                        request.resource.data.sender_id != request.resource.data.recipient_id &&
-                       request.resource.data.keys(['sender_id', 'recipient_id', 'encrypted_content', 'encrypted_aes_key', 'nonce', 'timestamp']).hasAll(['sender_id', 'recipient_id', 'encrypted_content', 'encrypted_aes_key', 'nonce', 'timestamp']) &&
                        request.resource.data.encrypted_content is string &&
-                       request.resource.data.encrypted_aes_key is string &&
                        request.resource.data.nonce is string &&
                        request.resource.data.status in ['sent', 'delivered', 'read'];
       
-      // Can update message status (for delivery/read receipts)
-      // But cannot change the content or sender/recipient
-      allow update: if request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'updated_at']) &&
-                       request.resource.data.status in ['sent', 'delivered', 'read'] &&
-                       request.resource.data.sender_id == resource.data.sender_id &&
-                       request.resource.data.recipient_id == resource.data.recipient_id;
+      // Allow status updates
+      allow update: if request.resource.data.diff(resource.data).affectedKeys()
+                         .hasOnly(['status', 'updated_at']) &&
+                       request.resource.data.status in ['sent', 'delivered', 'read'];
       
       // No delete allowed
       allow delete: if false;
@@ -73,25 +54,17 @@ service cloud.firestore {
     
     // Connection requests collection
     match /connection_requests/{requestId} {
-      // Anyone can read their own connection requests
-      // (In practice, users query by toSessionId or fromSessionId)
       allow read: if true;
       
-      // Can create a connection request if:
-      // 1. Both session IDs are valid
-      // 2. Request has required fields
-      // 3. From and to are different
       allow create: if isValidMercurioId(request.resource.data.fromSessionId) &&
                        isValidMercurioId(request.resource.data.toSessionId) &&
                        request.resource.data.fromSessionId != request.resource.data.toSessionId &&
-                       request.resource.data.keys(['fromSessionId', 'toSessionId', 'message', 'timestamp', 'status']).hasAll(['fromSessionId', 'toSessionId', 'timestamp', 'status']) &&
                        request.resource.data.status == 'pending';
       
-      // Can update status (accept/deny) but cannot change IDs or message
-      allow update: if request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status']) &&
-                       request.resource.data.status in ['accepted', 'denied', 'pending'] &&
-                       request.resource.data.fromSessionId == resource.data.fromSessionId &&
-                       request.resource.data.toSessionId == resource.data.toSessionId;
+      // Allow status updates
+      allow update: if request.resource.data.diff(resource.data)
+                         .affectedKeys().hasOnly(['status']) &&
+                       request.resource.data.status in ['accepted', 'denied', 'pending'];
       
       // No delete allowed
       allow delete: if false;

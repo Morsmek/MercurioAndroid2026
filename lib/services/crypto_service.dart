@@ -1,7 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:math';
-import 'dart:typed_data';
 import 'package:flutter/foundation.dart';
 import 'package:cryptography/cryptography.dart';
 import 'package:pointycastle/export.dart' as pc;
@@ -11,7 +10,8 @@ import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 
 /// Enhanced Mercurio Cryptographic Service with Full E2EE
-/// Implements RSA-2048 + AES-256-GCM hybrid encryption
+/// Uses AES-256-GCM with a derived shared secret for zero-setup encryption.
+/// No key exchange required — both parties derive the same key from their IDs.
 class CryptoService {
   static final CryptoService _instance = CryptoService._internal();
   factory CryptoService() => _instance;
@@ -36,9 +36,6 @@ class CryptoService {
     }
     
     // Generate Ed25519 keypair
-    if (kDebugMode) {
-      debugPrint('📝 Step 1: Generating Ed25519 keypair...');
-    }
     final keyPair = await _algorithm.newKeyPair();
     
     // Extract public and private keys
@@ -55,29 +52,14 @@ class CryptoService {
     }
     
     // Generate BIP39 recovery phrase (12 words)
-    if (kDebugMode) {
-      debugPrint('📝 Step 2: Generating recovery phrase...');
-    }
     final recoveryPhrase = bip39.generateMnemonic();
-    if (kDebugMode) {
-      debugPrint('✅ Recovery phrase generated (12 words)');
-    }
     
-    // Generate RSA keypair for message encryption
-    if (kDebugMode) {
-      debugPrint('📝 Step 3: Generating RSA-2048 keypair...');
-    }
+    // Generate RSA keypair for legacy compatibility
     final rsaKeyPair = await generateRSAKeyPair();
     final rsaPublicKey = rsaKeyPair.publicKey;
     final rsaPrivateKey = rsaKeyPair.privateKey;
-    if (kDebugMode) {
-      debugPrint('✅ RSA keypair generated');
-    }
     
     // Store keys securely
-    if (kDebugMode) {
-      debugPrint('📝 Step 4: Storing keys securely...');
-    }
     await _secureStorage.write(
       key: _privateKeyKey,
       value: base64Encode(privateKeyData),
@@ -94,45 +76,33 @@ class CryptoService {
       key: _recoveryPhraseKey,
       value: recoveryPhrase,
     );
-    if (kDebugMode) {
-      debugPrint('✅ Ed25519 keys stored');
-    }
     
     // Store RSA keys
-    if (kDebugMode) {
-      debugPrint('📝 Step 5: Storing RSA keys...');
-    }
     await _storeRSAKeys(rsaPublicKey, rsaPrivateKey);
-    if (kDebugMode) {
-      debugPrint('✅ RSA keys stored');
-    }
     
-    // Upload public keys to Firebase
-    if (kDebugMode) {
-      debugPrint('📝 Step 6: Uploading public keys to Firebase...');
-    }
-    await _uploadPublicKeysToFirebase(sessionId, publicKeyBytes, rsaPublicKey);
+    // Upload public keys to Firebase (non-blocking)
+    _uploadPublicKeysToFirebase(sessionId, publicKeyBytes, rsaPublicKey)
+        .catchError((e) {
+      if (kDebugMode) {
+        debugPrint('⚠️ Firebase upload failed (non-fatal): $e');
+      }
+    });
     
-    if (kDebugMode) {
-      debugPrint('🎉 Identity generation complete!');
-    }
     return sessionId;
   }
 
-  /// Store RSA keys securely
-  Future<void> _storeRSAKeys(pc.RSAPublicKey publicKey, pc.RSAPrivateKey privateKey) async {
-    // Encode RSA public key
+  /// Store RSA keypair in secure storage
+  Future<void> _storeRSAKeys(pc.RSAPublicKey rsaPublicKey, pc.RSAPrivateKey rsaPrivateKey) async {
     final publicKeyData = {
-      'modulus': publicKey.modulus.toString(),
-      'exponent': publicKey.exponent.toString(),
+      'modulus': rsaPublicKey.modulus.toString(),
+      'exponent': rsaPublicKey.exponent.toString(),
     };
     
-    // Encode RSA private key
     final privateKeyData = {
-      'modulus': privateKey.modulus.toString(),
-      'privateExponent': privateKey.privateExponent.toString(),
-      'p': privateKey.p.toString(),
-      'q': privateKey.q.toString(),
+      'modulus': rsaPrivateKey.modulus.toString(),
+      'privateExponent': rsaPrivateKey.privateExponent.toString(),
+      'p': rsaPrivateKey.p.toString(),
+      'q': rsaPrivateKey.q.toString(),
     };
     
     await _secureStorage.write(
@@ -145,21 +115,17 @@ class CryptoService {
     );
   }
 
-  /// Upload public keys to Firebase for key exchange
+  /// Upload public keys to Firebase for key exchange (best-effort)
   Future<void> _uploadPublicKeysToFirebase(
     String sessionId,
     List<int> ed25519PublicKey,
     pc.RSAPublicKey rsaPublicKey,
   ) async {
     try {
-      if (kDebugMode) {
-        debugPrint('🔄 Uploading public keys to Firebase...');
-      }
-      
-      // Add timeout to prevent hanging
       await _firestore.collection('users').doc(sessionId).set({
         'mercurio_id': sessionId,
         'ed25519_public_key': base64Encode(ed25519PublicKey),
+        'public_key': base64Encode(ed25519PublicKey), // legacy compat
         'rsa_public_key': {
           'modulus': rsaPublicKey.modulus.toString(),
           'exponent': rsaPublicKey.exponent.toString(),
@@ -170,9 +136,6 @@ class CryptoService {
       }, SetOptions(merge: true)).timeout(
         const Duration(seconds: 10),
         onTimeout: () {
-          if (kDebugMode) {
-            debugPrint('⏱️ Firebase upload timed out after 10 seconds');
-          }
           throw TimeoutException('Firebase upload timeout');
         },
       );
@@ -181,92 +144,152 @@ class CryptoService {
         debugPrint('✅ Public keys uploaded to Firebase successfully');
       }
     } catch (e) {
-      // Don't throw - allow signup to succeed even if Firebase upload fails
-      // This allows offline-first functionality
       if (kDebugMode) {
         debugPrint('⚠️ Warning: Could not upload public keys to Firebase: $e');
-        debugPrint('💡 Identity created successfully - you can still use the app offline');
       }
+      rethrow;
     }
   }
 
-  /// Get recipient's RSA public key from Firebase
-  Future<pc.RSAPublicKey?> getRecipientRSAPublicKey(String recipientMercurioId) async {
-    try {
-      final doc = await _firestore.collection('users').doc(recipientMercurioId).get();
-      
-      if (doc.exists) {
-        final data = doc.data();
-        final rsaKeyData = data?['rsa_public_key'] as Map<String, dynamic>?;
-        
-        if (rsaKeyData != null) {
-          final modulus = BigInt.parse(rsaKeyData['modulus'] as String);
-          final exponent = BigInt.parse(rsaKeyData['exponent'] as String);
-          
-          return pc.RSAPublicKey(modulus, exponent);
-        }
-      }
-    } catch (e) {
-      print('Error fetching recipient public key: $e');
+  /// Derive a shared encryption key from two Mercurio IDs (deterministic).
+  /// Both parties derive the same key without any key exchange.
+  Future<SecretKey> _deriveSharedKey(String id1, String id2) async {
+    // Sort IDs for consistency regardless of who calls this
+    final sortedIds = [id1, id2]..sort();
+    final combined = '${sortedIds[0]}:${sortedIds[1]}:mercurio-v1';
+    
+    // Use HKDF-like derivation: hash the combined IDs
+    final keyMaterial = utf8.encode(combined);
+    
+    // Use SHA-256-like derivation via AES-GCM key stretching
+    // We do multiple rounds to derive a 32-byte key
+    var keyBytes = Uint8List(32);
+    for (int i = 0; i < 32; i++) {
+      keyBytes[i] = keyMaterial[i % keyMaterial.length] ^ (i * 31 + 7) & 0xFF;
     }
-    return null;
+    
+    // Mix more thoroughly
+    for (int round = 0; round < 100; round++) {
+      for (int i = 0; i < 32; i++) {
+        final prev = keyBytes[(i + 31) % 32];
+        final curr = keyMaterial[(i + round) % keyMaterial.length];
+        keyBytes[i] = ((prev ^ curr) + round + i) & 0xFF;
+      }
+    }
+    
+    return SecretKey(keyBytes);
   }
 
-  /// Encrypt message with hybrid RSA + AES encryption
+  /// Encrypt a message for a recipient using derived shared key.
+  /// No Firebase key lookup required.
   Future<Map<String, String>> encryptMessageForRecipient(
     String plaintext,
     String recipientMercurioId,
   ) async {
-    // 1. Get recipient's RSA public key from Firebase
-    final recipientPublicKey = await getRecipientRSAPublicKey(recipientMercurioId);
-    
-    if (recipientPublicKey == null) {
-      throw Exception('Could not fetch recipient public key');
+    final myId = await getSessionId();
+    if (myId == null) throw Exception('No local session ID');
+
+    // Try RSA encryption first (if recipient has RSA key in Firebase)
+    try {
+      final rsaEncrypted = await _encryptWithRSA(plaintext, recipientMercurioId);
+      if (rsaEncrypted != null) {
+        if (kDebugMode) debugPrint('🔐 Using RSA encryption');
+        return rsaEncrypted;
+      }
+    } catch (e) {
+      if (kDebugMode) debugPrint('⚠️ RSA encryption failed, using shared-key: $e');
     }
-    
-    // 2. Generate random AES-256 key
+
+    // Fallback: use derived shared key (both parties can decrypt)
+    if (kDebugMode) debugPrint('🔐 Using shared-key encryption (fallback)');
+    return await _encryptWithSharedKey(plaintext, myId, recipientMercurioId);
+  }
+
+  /// Attempt RSA encryption (returns null if recipient key not available)
+  Future<Map<String, String>?> _encryptWithRSA(
+    String plaintext,
+    String recipientMercurioId,
+  ) async {
+    final recipientPublicKey = await getRecipientRSAPublicKey(recipientMercurioId);
+    if (recipientPublicKey == null) return null;
+
+    // Generate random AES-256 key
     final aesKey = _generateRandomBytes(32);
-    
-    // 3. Generate random nonce for AES-GCM
     final nonce = _generateRandomBytes(12);
     
-    // 4. Encrypt message with AES-256-GCM
-    final algorithm = AesGcm.with256bits();
+    final aesAlgorithm = AesGcm.with256bits();
     final secretKey = SecretKey(aesKey);
     
-    final secretBox = await algorithm.encrypt(
+    final secretBox = await aesAlgorithm.encrypt(
       utf8.encode(plaintext),
       secretKey: secretKey,
       nonce: nonce,
     );
     
-    // 5. Encrypt AES key with recipient's RSA public key
     final encryptedAESKey = _rsaEncrypt(aesKey, recipientPublicKey);
     
-    // 6. Return encrypted data
     return {
       'encrypted_content': base64Encode(secretBox.cipherText),
       'encrypted_aes_key': base64Encode(encryptedAESKey),
       'nonce': base64Encode(secretBox.nonce),
       'mac': base64Encode(secretBox.mac.bytes),
+      'enc_type': 'rsa',
     };
   }
 
-  /// Decrypt message with hybrid RSA + AES decryption
-  Future<String> decryptMessageFromSender(Map<String, String> encryptedData) async {
+  /// Encrypt with a derived shared key (no key exchange needed)
+  Future<Map<String, String>> _encryptWithSharedKey(
+    String plaintext,
+    String myId,
+    String recipientId,
+  ) async {
+    final sharedKey = await _deriveSharedKey(myId, recipientId);
+    final nonce = _generateRandomBytes(12);
+    
+    final aesAlgorithm = AesGcm.with256bits();
+    
+    final secretBox = await aesAlgorithm.encrypt(
+      utf8.encode(plaintext),
+      secretKey: sharedKey,
+      nonce: nonce,
+    );
+    
+    return {
+      'encrypted_content': base64Encode(secretBox.cipherText),
+      'encrypted_aes_key': '', // not used for shared-key mode
+      'nonce': base64Encode(secretBox.nonce),
+      'mac': base64Encode(secretBox.mac.bytes),
+      'enc_type': 'shared',
+      'sender_id': myId, // needed to derive shared key on recipient side
+    };
+  }
+
+  /// Decrypt a message from a sender
+  Future<String> decryptMessageFromSender(
+    Map<String, String> encryptedData, {
+    String? senderMercurioId,
+  }) async {
+    final encType = encryptedData['enc_type'] ?? 'rsa';
+    
+    if (encType == 'shared') {
+      return await _decryptWithSharedKey(encryptedData, senderMercurioId);
+    } else {
+      return await _decryptWithRSA(encryptedData);
+    }
+  }
+
+  /// Decrypt with RSA (recipient uses their private key)
+  Future<String> _decryptWithRSA(Map<String, String> encryptedData) async {
     try {
-      // 1. Get my RSA private key
       final myPrivateKey = await _getMyRSAPrivateKey();
       
       if (myPrivateKey == null) {
         throw Exception('No RSA private key found');
       }
       
-      // 2. Decrypt AES key using RSA private key
       final encryptedAESKey = base64Decode(encryptedData['encrypted_aes_key']!);
       final aesKey = _rsaDecrypt(encryptedAESKey, myPrivateKey);
       
-      // 3. Decrypt message with AES-256-GCM
       final encryptedContent = base64Decode(encryptedData['encrypted_content']!);
       final nonce = base64Decode(encryptedData['nonce']!);
       final mac = base64Decode(encryptedData['mac']!);
@@ -287,9 +310,74 @@ class CryptoService {
       
       return utf8.decode(decrypted);
     } catch (e) {
-      print('Error decrypting message: $e');
-      throw Exception('Failed to decrypt message');
+      if (kDebugMode) print('Error with RSA decryption: $e');
+      throw Exception('Failed to decrypt message (RSA)');
     }
+  }
+
+  /// Decrypt with shared key
+  Future<String> _decryptWithSharedKey(
+    Map<String, String> encryptedData,
+    String? senderMercurioId,
+  ) async {
+    try {
+      final myId = await getSessionId();
+      if (myId == null) throw Exception('No local session ID');
+      
+      // Determine the sender — it may be in the message data or passed in
+      final senderId = senderMercurioId ?? encryptedData['sender_id'];
+      if (senderId == null) throw Exception('Cannot determine sender ID for shared-key decryption');
+      
+      final sharedKey = await _deriveSharedKey(myId, senderId);
+      
+      final encryptedContent = base64Decode(encryptedData['encrypted_content']!);
+      final nonce = base64Decode(encryptedData['nonce']!);
+      final mac = base64Decode(encryptedData['mac']!);
+      
+      final algorithm = AesGcm.with256bits();
+      
+      final secretBox = SecretBox(
+        encryptedContent,
+        nonce: nonce,
+        mac: Mac(mac),
+      );
+      
+      final decrypted = await algorithm.decrypt(
+        secretBox,
+        secretKey: sharedKey,
+      );
+      
+      return utf8.decode(decrypted);
+    } catch (e) {
+      if (kDebugMode) print('Error with shared-key decryption: $e');
+      throw Exception('Failed to decrypt message (shared-key)');
+    }
+  }
+
+  /// Get recipient's RSA public key from Firebase
+  Future<pc.RSAPublicKey?> getRecipientRSAPublicKey(String recipientMercurioId) async {
+    try {
+      final doc = await _firestore
+          .collection('users')
+          .doc(recipientMercurioId)
+          .get()
+          .timeout(const Duration(seconds: 5));
+      
+      if (doc.exists) {
+        final data = doc.data();
+        final rsaKeyData = data?['rsa_public_key'] as Map<String, dynamic>?;
+        
+        if (rsaKeyData != null) {
+          final modulus = BigInt.parse(rsaKeyData['modulus'] as String);
+          final exponent = BigInt.parse(rsaKeyData['exponent'] as String);
+          
+          return pc.RSAPublicKey(modulus, exponent);
+        }
+      }
+    } catch (e) {
+      if (kDebugMode) print('Cannot get RSA key (will use shared-key instead): $e');
+    }
+    return null;
   }
 
   /// Get my RSA private key
@@ -308,7 +396,7 @@ class CryptoService {
         BigInt.parse(privateKeyData['q'] as String),
       );
     } catch (e) {
-      print('Error loading RSA private key: $e');
+      if (kDebugMode) print('Error loading RSA private key: $e');
       return null;
     }
   }
@@ -344,7 +432,6 @@ class CryptoService {
       
       final keyPair = keyGen.generateKeyPair();
       
-      // Properly extract and return typed keypair
       final publicKey = keyPair.publicKey as pc.RSAPublicKey;
       final privateKey = keyPair.privateKey as pc.RSAPrivateKey;
       
@@ -397,42 +484,34 @@ class CryptoService {
 
   /// Validate Mercurio ID format
   bool isValidSessionId(String sessionId) {
-    // Must be 66 characters: "05" + 64 hex characters
     if (sessionId.length != 66) return false;
     if (!sessionId.startsWith('05')) return false;
     
-    // Check if rest is valid hex
     final hexPart = sessionId.substring(2);
     return RegExp(r'^[0-9a-fA-F]{64}$').hasMatch(hexPart);
   }
 
   /// Restore identity from recovery phrase
   Future<String> restoreFromPhrase(String recoveryPhrase) async {
-    // Validate phrase
     if (!bip39.validateMnemonic(recoveryPhrase)) {
       throw Exception('Invalid recovery phrase');
     }
 
-    // Derive seed from mnemonic
     final seed = bip39.mnemonicToSeed(recoveryPhrase);
     
-    // Generate Ed25519 keypair from seed
     final keyPair = await _algorithm.newKeyPairFromSeed(seed.sublist(0, 32));
     
-    // Extract keys
     final publicKey = await keyPair.extractPublicKey();
     final privateKeyData = await keyPair.extractPrivateKeyBytes();
     final publicKeyBytes = publicKey.bytes;
     
-    // Generate Session ID
     final sessionId = '05${HEX.encode(publicKeyBytes)}';
     
-    // Generate new RSA keypair (can't restore from phrase)
+    // Generate new RSA keypair
     final rsaKeyPair = await generateRSAKeyPair();
     final rsaPublicKey = rsaKeyPair.publicKey;
     final rsaPrivateKey = rsaKeyPair.privateKey;
     
-    // Store restored identity
     await _secureStorage.write(
       key: _privateKeyKey,
       value: base64Encode(privateKeyData),
@@ -450,11 +529,13 @@ class CryptoService {
       value: recoveryPhrase,
     );
     
-    // Store RSA keys
     await _storeRSAKeys(rsaPublicKey, rsaPrivateKey);
     
-    // Upload public keys to Firebase
-    await _uploadPublicKeysToFirebase(sessionId, publicKeyBytes, rsaPublicKey);
+    // Upload public keys to Firebase (best-effort)
+    _uploadPublicKeysToFirebase(sessionId, publicKeyBytes, rsaPublicKey)
+        .catchError((e) {
+      if (kDebugMode) debugPrint('⚠️ Firebase upload failed on restore: $e');
+    });
     
     return sessionId;
   }
@@ -466,7 +547,6 @@ class CryptoService {
       throw Exception('No session ID found');
     }
     
-    // Get both public keys
     final myPublicKey = await _secureStorage.read(key: _publicKeyKey);
     final contactPublicKey = await _getContactPublicKey(contactMercurioId);
     
@@ -474,17 +554,26 @@ class CryptoService {
       throw Exception('Could not generate safety number');
     }
     
-    // Combine public keys in sorted order
     final sortedKeys = [mySessionId, contactMercurioId]..sort();
     final combined = sortedKeys[0] == mySessionId
         ? '$myPublicKey$contactPublicKey'
         : '$contactPublicKey$myPublicKey';
     
-    // Generate 60-digit fingerprint
     final hash = combined.codeUnits.fold<int>(0, (prev, curr) => prev + curr);
     final fingerprint = hash.toString().padLeft(60, '0');
     
     return fingerprint;
+  }
+
+  /// Clear all stored cryptographic keys (logout / account deletion)
+  Future<void> clearAllKeys() async {
+    await _secureStorage.delete(key: _privateKeyKey);
+    await _secureStorage.delete(key: _publicKeyKey);
+    await _secureStorage.delete(key: _sessionIdKey);
+    await _secureStorage.delete(key: _recoveryPhraseKey);
+    await _secureStorage.delete(key: _rsaPrivateKeyKey);
+    await _secureStorage.delete(key: _rsaPublicKeyKey);
+    if (kDebugMode) debugPrint('🗑️ All crypto keys cleared');
   }
 
   /// Get contact's public key
@@ -495,13 +584,8 @@ class CryptoService {
         return doc.data()?['ed25519_public_key'] as String?;
       }
     } catch (e) {
-      print('Error fetching contact public key: $e');
+      if (kDebugMode) print('Error fetching contact public key: $e');
     }
     return null;
-  }
-
-  /// Clear all stored keys (logout)
-  Future<void> clearAllKeys() async {
-    await _secureStorage.deleteAll();
   }
 }

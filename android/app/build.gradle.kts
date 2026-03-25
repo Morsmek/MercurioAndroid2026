@@ -8,7 +8,7 @@ plugins {
 
 android {
     namespace = "com.mercurio.chat"
-    compileSdk = 34  // Android 14 - Maximum supported by all Flutter plugins
+    compileSdk = 36
     ndkVersion = flutter.ndkVersion
 
     compileOptions {
@@ -20,39 +20,32 @@ android {
         jvmTarget = JavaVersion.VERSION_11.toString()
     }
 
+    signingConfigs {
+        create("release") {
+            keyAlias = "mercurio"
+            keyPassword = "mercurio2026"
+            storeFile = file("mercurio-release.jks")
+            storePassword = "mercurio2026"
+        }
+    }
+
     defaultConfig {
-        // TODO: Specify your own unique Application ID (https://developer.android.com/studio/build/application-id.html).
         applicationId = "com.mercurio.chat"
-        // You can update the following values to match your application needs.
-        // For more information, see: https://flutter.dev/to/review-gradle-config.
-        minSdk = 24  // Explicitly set to 24 for compatibility with all dependencies
-        targetSdk = 34  // Android 14 - Maximum supported by all Flutter plugins
+        minSdk = 24
+        targetSdk = 36
         versionCode = flutter.versionCode
         versionName = flutter.versionName
-        
-        // Enable multidex for larger apps
         multiDexEnabled = true
     }
 
     buildTypes {
         release {
-            // Disable code shrinking for initial release to avoid runtime issues
-            // Enable these after thorough testing with ProGuard rules
             isMinifyEnabled = false
             isShrinkResources = false
-            
-            // Proguard rules (commented out for now)
-            // proguardFiles(
-            //     getDefaultProguardFile("proguard-android-optimize.txt"),
-            //     "proguard-rules.pro"
-            // )
-            
-            // TODO: Add your own signing config for the release build.
-            // Signing with the debug keys for now, so `flutter run --release` works.
-            signingConfig = signingConfigs.getByName("debug")
+            // Use the stable release keystore — same cert across all builds
+            signingConfig = signingConfigs.getByName("release")
         }
         debug {
-            // Disable minification for debug builds
             isMinifyEnabled = false
         }
     }
@@ -63,6 +56,5 @@ flutter {
 }
 
 dependencies {
-    // MultiDex support for apps with many dependencies
     implementation("androidx.multidex:multidex:2.0.1")
 }
