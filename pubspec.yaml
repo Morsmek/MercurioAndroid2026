@@ -71,6 +71,10 @@ dependencies:
   # Biometric Authentication
   local_auth: 2.3.0
 
+  # Notifications & Intents
+  flutter_local_notifications: ^17.2.4
+  android_intent_plus: ^5.1.0
+
 dev_dependencies:
   flutter_test:
     sdk: flutter

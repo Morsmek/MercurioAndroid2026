@@ -11,6 +11,10 @@ import 'package:mercurio_messenger/screens/add_contact_screen.dart';
 import 'package:mercurio_messenger/screens/chat_screen.dart';
 import 'package:mercurio_messenger/screens/qr_display_screen.dart';
 import 'dart:async';
+import 'package:mercurio_messenger/services/translation_service.dart';
+import 'package:mercurio_messenger/services/push_notification_service.dart';
+import 'dart:io' show Platform;
+import 'package:android_intent_plus/android_intent_plus.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -35,6 +39,13 @@ class _HomeScreenState extends State<HomeScreen> {
     _loadData();
     _setupMessageListener();
     _setupConnectionRequestListener();
+    _initServices();
+  }
+
+  Future<void> _initServices() async {
+    await TranslationService().init();
+    await PushNotificationService().init();
+    if (mounted) setState(() {});
   }
 
   @override
@@ -435,11 +446,27 @@ class _HomeScreenState extends State<HomeScreen> {
         ListTile(
           leading: const Icon(Icons.notifications),
           title: const Text('Notifications'),
-          subtitle: const Text('Manage notification preferences'),
-          onTap: () {
-            ScaffoldMessenger.of(context).showSnackBar(
-              const SnackBar(content: Text('Notification settings coming soon')),
-            );
+          subtitle: const Text('Tap to open system notification settings'),
+          onTap: () async {
+            if (Platform.isAndroid) {
+              final intent = AndroidIntent(
+                action: 'android.settings.APP_NOTIFICATION_SETTINGS',
+                arguments: <String, dynamic>{
+                  'android.provider.extra.APP_PACKAGE': 'com.mercurio.chat',
+                },
+              );
+              await intent.launch();
+            }
+          },
+        ),
+        SwitchListTile(
+          secondary: const Icon(Icons.translate),
+          title: const Text('Translation (EN ↔ RU)'),
+          subtitle: const Text('Show translation option under messages'),
+          value: TranslationService().isEnabled,
+          onChanged: (val) async {
+            await TranslationService().setEnabled(val);
+            setState(() {});
           },
         ),
         ListTile(
