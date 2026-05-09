@@ -1,0 +1,15 @@
+version: '3.8'
+services:
+  coturn:
+    image: instrumentisto/coturn:4.5
+    restart: unless-stopped
+    ports:
+      - "3478:3478"
+      - "3478:3478/udp"
+      - "5349:5349"
+      - "5349:5349/udp"
+    volumes:
+      - ./turnserver.conf:/etc/turnserver.conf:ro
+      - ./certs:/etc/letsencrypt/live/example.com:ro
+    environment:
+      - TZ=UTC
