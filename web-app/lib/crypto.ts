@@ -7,7 +7,10 @@ export interface RSAPublicKey {
 
 export interface EncryptedMessage {
   encryptedContent: string;
-  encryptedAesKey: string;
+  // AES key encrypted for the recipient (they can decrypt the content)
+  encryptedAesKeyForRecipient: string;
+  // AES key encrypted for the sender (so sender can re-read their own messages)
+  encryptedAesKeyForSender: string;
   nonce: string;
   mac: string;
 }
@@ -66,13 +69,23 @@ class CryptoService {
       throw new Error('Invalid recovery phrase');
     }
 
-    this.recoveryPhrase = phrase;
-    const seed = await bip39.mnemonicToSeed(phrase);
-    const seedArray = new Uint8Array(seed.slice(0, 32));
+    // Try to load existing identity for this phrase from storage
+    const stored = localStorage.getItem('mercurio_identity');
+    if (stored) {
+      try {
+        const identity = JSON.parse(stored);
+        // If the stored phrase matches, just reload it
+        if (identity.recoveryPhrase === phrase) {
+          await this.loadFromStorage();
+          if (this.mercurioId) return this.mercurioId;
+        }
+      } catch {}
+    }
 
-    seedArray[0] &= 248;
-    seedArray[31] &= 127;
-    seedArray[31] |= 64;
+    // Otherwise generate a new identity and store the phrase with it
+    // NOTE: True deterministic key derivation from BIP39 requires more crypto primitives
+    // than Web Crypto API provides for Ed25519. We generate fresh keys, tie them to phrase.
+    this.recoveryPhrase = phrase;
 
     const ed25519KeyPair = await crypto.subtle.generateKey(
       { name: 'Ed25519' },
@@ -106,7 +119,19 @@ class CryptoService {
     return this.mercurioId;
   }
 
-  async encryptMessage(plaintext: string, recipientRSAPublicKey: RSAPublicKey): Promise<EncryptedMessage> {
+  /**
+   * Encrypt a message for the recipient AND for the sender (so both can read it).
+   */
+  async encryptMessage(
+    plaintext: string,
+    recipientRSAPublicKey: RSAPublicKey
+  ): Promise<EncryptedMessage> {
+    if (!this.rsaPublicKey) {
+      await this.loadFromStorage();
+      if (!this.rsaPublicKey) throw new Error('No RSA public key found');
+    }
+
+    // Generate a single AES key for the message content
     const aesKey = await crypto.subtle.generateKey(
       { name: 'AES-GCM', length: 256 },
       true,
@@ -128,27 +153,46 @@ class CryptoService {
 
     const aesKeyBuffer = await crypto.subtle.exportKey('raw', aesKey);
 
+    // Encrypt AES key for recipient
     const recipientKey = await this.importRSAPublicKey(recipientRSAPublicKey);
-    const encryptedAesKey = await crypto.subtle.encrypt(
+    const encryptedAesKeyForRecipient = await crypto.subtle.encrypt(
       { name: 'RSA-OAEP' },
       recipientKey,
       aesKeyBuffer
     );
 
+    // Encrypt AES key for sender (so sender can also read message later)
+    const encryptedAesKeyForSender = await crypto.subtle.encrypt(
+      { name: 'RSA-OAEP' },
+      this.rsaPublicKey,
+      aesKeyBuffer
+    );
+
     return {
       encryptedContent: this.bufferToBase64(ciphertext),
-      encryptedAesKey: this.bufferToBase64(new Uint8Array(encryptedAesKey)),
+      encryptedAesKeyForRecipient: this.bufferToBase64(new Uint8Array(encryptedAesKeyForRecipient)),
+      encryptedAesKeyForSender: this.bufferToBase64(new Uint8Array(encryptedAesKeyForSender)),
       nonce: this.bufferToBase64(nonce),
       mac: this.bufferToBase64(mac),
     };
   }
 
-  async decryptMessage(encryptedMessage: EncryptedMessage): Promise<string> {
+  /**
+   * Decrypt a message using the appropriate encrypted AES key.
+   * Pass encryptedAesKey - either the recipient's or sender's version.
+   */
+  async decryptMessage(params: {
+    encryptedContent: string;
+    encryptedAesKey: string;
+    nonce: string;
+    mac: string;
+  }): Promise<string> {
     if (!this.rsaPrivateKey) {
-      throw new Error('No RSA private key found');
+      await this.loadFromStorage();
+      if (!this.rsaPrivateKey) throw new Error('No RSA private key found');
     }
 
-    const encryptedAesKeyBuffer = this.base64ToBuffer(encryptedMessage.encryptedAesKey);
+    const encryptedAesKeyBuffer = this.base64ToBuffer(params.encryptedAesKey);
     const aesKeyBuffer = await crypto.subtle.decrypt(
       { name: 'RSA-OAEP' },
       this.rsaPrivateKey,
@@ -163,13 +207,13 @@ class CryptoService {
       ['decrypt']
     );
 
-    const ciphertext = this.base64ToBuffer(encryptedMessage.encryptedContent);
-    const nonce = this.base64ToBuffer(encryptedMessage.nonce);
-    const mac = this.base64ToBuffer(encryptedMessage.mac);
+    const ciphertext = this.base64ToBuffer(params.encryptedContent);
+    const nonce = this.base64ToBuffer(params.nonce);
+    const mac = this.base64ToBuffer(params.mac);
 
-    const combined = new Uint8Array(ciphertext.length + mac.length);
+    const combined = new Uint8Array(ciphertext.byteLength + mac.byteLength);
     combined.set(new Uint8Array(ciphertext), 0);
-    combined.set(new Uint8Array(mac), ciphertext.length);
+    combined.set(new Uint8Array(mac), ciphertext.byteLength);
 
     const decrypted = await crypto.subtle.decrypt(
       { name: 'AES-GCM', iv: new Uint8Array(nonce) },
@@ -183,7 +227,10 @@ class CryptoService {
 
   async getPublicKeys(): Promise<{ ed25519: string; rsa: RSAPublicKey }> {
     if (!this.ed25519PublicKey || !this.rsaPublicKey) {
-      throw new Error('Keys not found');
+      await this.loadFromStorage();
+      if (!this.ed25519PublicKey || !this.rsaPublicKey) {
+        throw new Error('Keys not found');
+      }
     }
 
     const ed25519Buffer = await crypto.subtle.exportKey('raw', this.ed25519PublicKey);
@@ -199,6 +246,7 @@ class CryptoService {
   }
 
   async hasIdentity(): Promise<boolean> {
+    if (this.mercurioId) return true;
     await this.loadFromStorage();
     return this.mercurioId !== null;
   }
@@ -209,6 +257,12 @@ class CryptoService {
 
   getRecoveryPhrase(): string | null {
     return this.recoveryPhrase;
+  }
+
+  async ensureLoaded(): Promise<void> {
+    if (!this.mercurioId) {
+      await this.loadFromStorage();
+    }
   }
 
   async clearAllKeys(): Promise<void> {
@@ -244,7 +298,7 @@ class CryptoService {
     localStorage.setItem('mercurio_identity', JSON.stringify(identity));
   }
 
-  private async loadFromStorage(): Promise<void> {
+  async loadFromStorage(): Promise<void> {
     const stored = localStorage.getItem('mercurio_identity');
     if (!stored) return;
 
@@ -317,11 +371,11 @@ class CryptoService {
       .join('');
   }
 
-  private bufferToBase64(buffer: Uint8Array): string {
+  bufferToBase64(buffer: Uint8Array): string {
     return btoa(String.fromCharCode.apply(null, Array.from(buffer)));
   }
 
-  private base64ToBuffer(base64: string): ArrayBuffer {
+  base64ToBuffer(base64: string): ArrayBuffer {
     const binary = atob(base64);
     const bytes = new Uint8Array(binary.length);
     for (let i = 0; i < binary.length; i++) {

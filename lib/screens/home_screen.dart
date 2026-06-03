@@ -587,7 +587,7 @@ class _HomeScreenState extends State<HomeScreen> {
               try {
                 await FirebaseMessagingService().setOnlineStatus(false);
                 await FirebaseMessagingService().dispose();
-                await ConnectionService().dispose();
+                ConnectionService().dispose();
                 await CryptoService().clearAllKeys();
                 await StorageService().clearAllData();
 

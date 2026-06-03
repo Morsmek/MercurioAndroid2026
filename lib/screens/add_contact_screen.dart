@@ -1,13 +1,11 @@
 import 'package:flutter/material.dart';
-import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
 import 'package:mercurio_messenger/services/crypto_service.dart';
 import 'package:mercurio_messenger/services/storage_service.dart';
 import 'package:mercurio_messenger/models/contact.dart';
 import 'package:mercurio_messenger/models/conversation.dart';
-import 'package:mercurio_messenger/services/connection_service.dart';
-import 'package:uuid/uuid.dart';
+import 'package:mercurio_messenger/screens/chat_screen.dart';
 
 class AddContactScreen extends StatefulWidget {
   const AddContactScreen({super.key});
@@ -61,7 +59,6 @@ class _AddContactScreenState extends State<AddContactScreen> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            // Icon
             Icon(
               Icons.person_add,
               size: 80,
@@ -69,10 +66,15 @@ class _AddContactScreenState extends State<AddContactScreen> {
             ),
             const SizedBox(height: 32),
 
-            // Title
             Text(
               'Add New Contact',
               style: Theme.of(context).textTheme.displayMedium,
+              textAlign: TextAlign.center,
+            ),
+            const SizedBox(height: 8),
+            Text(
+              'Enter their Mercurio ID to start chatting immediately.',
+              style: Theme.of(context).textTheme.bodyMedium,
               textAlign: TextAlign.center,
             ),
             const SizedBox(height: 32),
@@ -96,12 +98,10 @@ class _AddContactScreenState extends State<AddContactScreen> {
                 if (value == null || value.trim().isEmpty) {
                   return 'Please enter a Mercurio ID';
                 }
-
                 final cleanId = value.trim().replaceAll('\n', '').replaceAll(' ', '');
                 if (!CryptoService().isValidSessionId(cleanId)) {
-                  return 'Invalid Mercurio ID format (must be 66 hex characters starting with 05)';
+                  return 'Invalid Mercurio ID (must be 66 hex chars starting with 05)';
                 }
-
                 return null;
               },
             ),
@@ -134,11 +134,10 @@ class _AddContactScreenState extends State<AddContactScreen> {
                       width: 20,
                       child: CircularProgressIndicator(strokeWidth: 2),
                     )
-                  : const Text('Add Contact'),
+                  : const Text('Add Contact & Start Chat'),
             ),
             const SizedBox(height: 16),
 
-            // Scan QR Code Button
             OutlinedButton.icon(
               onPressed: () {
                 setState(() {
@@ -146,11 +145,38 @@ class _AddContactScreenState extends State<AddContactScreen> {
                 });
               },
               icon: const Icon(Icons.qr_code_scanner),
-              label: const Text('Scan QR Code'),
+              label: const Text('Scan QR Code Instead'),
               style: OutlinedButton.styleFrom(
                 foregroundColor: Theme.of(context).colorScheme.primary,
                 side: BorderSide(color: Theme.of(context).colorScheme.primary),
                 padding: const EdgeInsets.symmetric(vertical: 16),
+              ),
+            ),
+            const SizedBox(height: 24),
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: Theme.of(context).colorScheme.surface,
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(
+                  color: Theme.of(context).colorScheme.outline.withValues(alpha: 0.3),
+                ),
+              ),
+              child: Row(
+                children: [
+                  Icon(
+                    Icons.info_outline,
+                    size: 16,
+                    color: Theme.of(context).colorScheme.primary,
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      'No approval needed. Messages are end-to-end encrypted and will be delivered when they are online.',
+                      style: Theme.of(context).textTheme.bodySmall,
+                    ),
+                  ),
+                ],
               ),
             ),
           ],
@@ -170,13 +196,13 @@ class _AddContactScreenState extends State<AddContactScreen> {
                   final List<Barcode> barcodes = capture.barcodes;
                   if (barcodes.isNotEmpty) {
                     final mercurioId = barcodes.first.rawValue;
-                    if (mercurioId != null && CryptoService().isValidSessionId(mercurioId)) {
+                    if (mercurioId != null &&
+                        CryptoService().isValidSessionId(mercurioId)) {
                       _handleScannedId(mercurioId);
                     }
                   }
                 },
               ),
-              // Overlay with instructions
               Positioned(
                 bottom: 40,
                 left: 20,
@@ -215,7 +241,6 @@ class _AddContactScreenState extends State<AddContactScreen> {
       _showScanner = false;
       _mercurioIdController.text = mercurioId;
     });
-
     ScaffoldMessenger.of(context).showSnackBar(
       const SnackBar(
         content: Text('QR code scanned! Enter a display name to continue.'),
@@ -225,163 +250,129 @@ class _AddContactScreenState extends State<AddContactScreen> {
   }
 
   Future<void> _addContact() async {
-    if (!_formKey.currentState!.validate()) {
-      return;
-    }
+    if (!_formKey.currentState!.validate()) return;
 
-    final mercurioId = _mercurioIdController.text.trim().replaceAll('\n', '').replaceAll(' ', '');
+    final mercurioId = _mercurioIdController.text
+        .trim()
+        .replaceAll('\n', '')
+        .replaceAll(' ', '');
     final displayName = _displayNameController.text.trim();
 
-    // Check if trying to add yourself
+    // Prevent adding yourself
     final myMercurioId = await CryptoService().getSessionId();
     if (mercurioId == myMercurioId) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: const Text('You cannot add yourself as a contact'),
-          backgroundColor: Theme.of(context).colorScheme.error,
-        ),
-      );
-      return;
-    }
-
-    // Check if contact already exists
-    final existingContact = await StorageService().getContact(mercurioId);
-    if (existingContact != null) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('This contact already exists!'),
-            backgroundColor: Colors.orange,
+          SnackBar(
+            content: const Text('You cannot add yourself as a contact'),
+            backgroundColor: Theme.of(context).colorScheme.error,
           ),
         );
       }
       return;
     }
 
-    // Show dialog to request connection
-    await _showConnectionRequestDialog(mercurioId, displayName);
-  }
+    // Check if already exists
+    final existingContact = await StorageService().getContact(mercurioId);
+    if (existingContact != null) {
+      // Contact exists — just open the chat
+      if (mounted) {
+        _openChatWithContact(mercurioId, existingContact['displayName'] as String);
+      }
+      return;
+    }
 
-  Future<void> _showConnectionRequestDialog(String mercurioId, String displayName) async {
-    final messageController = TextEditingController();
-    
-    final result = await showDialog<String>(
-      context: context,
-      barrierDismissible: false,
-      builder: (context) => AlertDialog(
-        title: const Text('Request Connection'),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              'Tell $displayName who you are in 10 words or less:',
-              style: Theme.of(context).textTheme.bodyMedium,
-            ),
-            const SizedBox(height: 16),
-            TextField(
-              controller: messageController,
-              maxLength: 100,
-              maxLines: 2,
-              decoration: const InputDecoration(
-                hintText: 'e.g., Hey, it\'s John from work!',
-                border: OutlineInputBorder(),
-              ),
-              onChanged: (text) {
-                // Count words
-                final wordCount = text.trim().split(RegExp(r'\s+')).where((w) => w.isNotEmpty).length;
-                if (wordCount > 10) {
-                  // Truncate to 10 words
-                  final words = text.trim().split(RegExp(r'\s+')).take(10).join(' ');
-                  messageController.text = words;
-                  messageController.selection = TextSelection.fromPosition(
-                    TextPosition(offset: words.length),
-                  );
-                }
-              },
-            ),
-          ],
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context, null),
-            child: const Text('Cancel'),
-          ),
-          ElevatedButton(
-            onPressed: () {
-              final message = messageController.text.trim();
-              if (message.isEmpty) {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(content: Text('Please enter a message')),
-                );
-                return;
-              }
-              Navigator.pop(context, message);
-            },
-            child: const Text('Send Request'),
-          ),
-        ],
-      ),
-    );
-
-    if (result == null) return; // User cancelled
-
-    // Send connection request
-    setState(() {
-      _isAdding = true;
-    });
+    setState(() => _isAdding = true);
 
     try {
-      await ConnectionService().sendRequest(
-        toSessionId: mercurioId,
-        message: result,
+      // ── 1. Save contact locally ───────────────────────────────────────────
+      final contact = Contact(
+        sessionId: mercurioId,
         displayName: displayName,
+        verified: false,
+        blocked: false,
       );
+      await StorageService().saveContact(contact.toMap());
+
+      // ── 2. Create a conversation entry locally ────────────────────────────
+      final conversationId = _getConversationId(myMercurioId!, mercurioId);
+      final conversation = {
+        'id': conversationId,
+        'contactSessionId': mercurioId,
+        'contactName': displayName,
+        'lastMessage': '',
+        'lastMessageTimestamp': DateTime.now().millisecondsSinceEpoch,
+        'unreadCount': 0,
+      };
+      await StorageService().saveConversation(conversation);
 
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Connection request sent!'),
+          SnackBar(
+            content: Text('$displayName added! Opening chat...'),
             backgroundColor: Colors.green,
+            duration: const Duration(seconds: 1),
           ),
         );
-        Navigator.of(context).pop(true);
+        _openChatWithContact(mercurioId, displayName);
       }
     } catch (e) {
       if (mounted) {
-        String errorMessage = 'Error sending request: ${e.toString()}';
-
-        if (e.toString().contains('permission-denied')) {
-          errorMessage = 'Firebase permission denied. Please ensure Firestore security rules are deployed correctly.';
-        } else if (e.toString().contains('not-found')) {
-          errorMessage = 'Contact not found. They may need to register first.';
-        } else if (e.toString().contains('network')) {
-          errorMessage = 'Network error. Please check your internet connection.';
-        }
-
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text(errorMessage),
+            content: Text('Error adding contact: $e'),
             backgroundColor: Theme.of(context).colorScheme.error,
-            duration: const Duration(seconds: 5),
-            action: SnackBarAction(
-              label: 'Dismiss',
-              textColor: Colors.white,
-              onPressed: () {},
-            ),
           ),
         );
       }
     } finally {
-      if (mounted) {
-        setState(() {
-          _isAdding = false;
-        });
-      }
+      if (mounted) setState(() => _isAdding = false);
     }
   }
 
-  /// Generate deterministic conversation ID from two session IDs
+  /// Navigate to the chat screen for this contact
+  void _openChatWithContact(String contactId, String contactName) {
+    // Retrieve actual conversation from storage, then navigate
+    StorageService().getAllConversations().then((conversations) {
+      final conv = conversations.firstWhere(
+        (c) => c['contactSessionId'] == contactId,
+        orElse: () => {
+          'id': contactId, // placeholder, real ID from storage
+          'contactSessionId': contactId,
+          'contactName': contactName,
+          'lastMessage': '',
+          'lastMessageTimestamp': DateTime.now().millisecondsSinceEpoch,
+          'unreadCount': 0,
+        },
+      );
+
+      final contactModel = Contact(
+        sessionId: contactId,
+        displayName: contactName,
+        verified: false,
+        blocked: false,
+      );
+
+      final conversationModel = Conversation.fromMap(conv);
+
+      if (mounted) {
+        Navigator.of(context).pushReplacement(
+          MaterialPageRoute(
+            builder: (context) => ChatScreen(
+              conversation: conversationModel,
+              contact: contactModel,
+            ),
+          ),
+        );
+      }
+    }).catchError((e) {
+      if (mounted) {
+        Navigator.of(context).pop(true);
+      }
+    });
+  }
+
+  /// Generate deterministic conversation ID
   String _getConversationId(String id1, String id2) {
     final sortedIds = [id1, id2]..sort();
     return '${sortedIds[0]}_${sortedIds[1]}';

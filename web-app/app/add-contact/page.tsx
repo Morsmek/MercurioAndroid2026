@@ -3,7 +3,7 @@
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { cryptoService } from '@/lib/crypto';
-import { addContact, fetchUserPublicKeys } from '@/lib/supabase';
+import { addContact, fetchUserPublicKeys, upsertConversation, generateConversationId } from '@/lib/api';
 
 export default function AddContactPage() {
   const router = useRouter();
@@ -17,32 +17,51 @@ export default function AddContactPage() {
   };
 
   const handleAddContact = async () => {
-    if (!mercurioId || !displayName) return;
+    if (!mercurioId.trim() || !displayName.trim()) return;
 
     setIsAdding(true);
     setError('');
 
     try {
+      await cryptoService.ensureLoaded();
       const myId = cryptoService.getMercurioId();
       if (!myId) throw new Error('Not authenticated');
 
-      if (!isValidMercurioId(mercurioId)) {
-        throw new Error('Invalid Mercurio ID format');
+      const trimmedId = mercurioId.trim();
+
+      if (!isValidMercurioId(trimmedId)) {
+        throw new Error('Invalid Mercurio ID format (must start with 05 and be 66 chars)');
       }
 
-      const user = await fetchUserPublicKeys(mercurioId);
+      if (trimmedId === myId) {
+        throw new Error('You cannot add yourself as a contact');
+      }
+
+      // Verify the user exists
+      const user = await fetchUserPublicKeys(trimmedId);
       if (!user) {
-        throw new Error('User not found');
+        throw new Error('User not found. Make sure they have registered first.');
       }
 
+      // Add contact entry
       await addContact({
         user_mercurio_id: myId,
-        contact_mercurio_id: mercurioId,
-        display_name: displayName,
+        contact_mercurio_id: trimmedId,
+        display_name: displayName.trim(),
         verified: false,
       });
 
-      router.push('/home');
+      // Create/ensure conversation exists
+      const conversationId = generateConversationId(myId, trimmedId);
+      const sorted = [myId, trimmedId].sort();
+      await upsertConversation({
+        id: conversationId,
+        participant1_id: sorted[0],
+        participant2_id: sorted[1],
+      });
+
+      // Navigate directly to the chat
+      router.push(`/chat/${conversationId}`);
     } catch (err: any) {
       setError(err.message || 'Failed to add contact');
     } finally {
@@ -53,36 +72,39 @@ export default function AddContactPage() {
   return (
     <div className="min-h-screen p-6">
       <div className="max-w-md mx-auto space-y-8 py-8">
-        <div className="text-center">
-          <div className="w-20 h-20 mx-auto mb-6 gradient-bg rounded-2xl flex items-center justify-center">
+        <div className="flex items-center gap-4 mb-6">
+          <button
+            onClick={() => router.back()}
+            className="text-primary hover:text-primary-light"
+          >
+            <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
+            </svg>
+          </button>
+          <h1 className="text-2xl font-bold gradient-text">Add Contact</h1>
+        </div>
+
+        <div className="flex flex-col items-center mb-6">
+          <div className="w-20 h-20 gradient-bg rounded-2xl flex items-center justify-center">
             <svg className="w-10 h-10 text-black" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M18 9v3m0 0v3m0-3h3m-3 0h-3m-2-5a4 4 0 11-8 0 4 4 0 018 0zM3 20a6 6 0 0112 0v1H3v-1z" />
             </svg>
           </div>
-
-          <h1 className="text-3xl font-bold gradient-text mb-4">Add Contact</h1>
         </div>
 
         <div className="space-y-4">
           <div>
-            <label className="block text-sm font-medium text-gray-300 mb-2">Mercurio ID</label>
-            <div className="flex gap-2">
-              <input
-                type="text"
-                value={mercurioId}
-                onChange={(e) => setMercurioId(e.target.value)}
-                placeholder="05..."
-                className="flex-1 px-4 py-3 bg-white/5 border border-white/10 rounded-xl text-white placeholder-gray-500 focus:outline-none focus:border-primary transition-colors font-mono text-sm"
-              />
-              <button
-                className="w-12 h-12 gradient-bg rounded-xl flex items-center justify-center hover:opacity-90 transition-opacity"
-                title="Scan QR Code"
-              >
-                <svg className="w-6 h-6 text-black" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v1m6 11h2m-6 0h-2v4m0-11v3m0 0h.01M12 12h4.01M16 20h4M4 12h4m12 0h.01M5 8h2a1 1 0 001-1V5a1 1 0 00-1-1H5a1 1 0 00-1 1v2a1 1 0 001 1zm12 0h2a1 1 0 001-1V5a1 1 0 00-1-1h-2a1 1 0 00-1 1v2a1 1 0 001 1zM5 20h2a1 1 0 001-1v-2a1 1 0 00-1-1H5a1 1 0 00-1 1v2a1 1 0 001 1z" />
-                </svg>
-              </button>
-            </div>
+            <label className="block text-sm font-medium text-gray-300 mb-2">
+              Mercurio ID
+              <span className="text-gray-500 font-normal ml-2">(starts with 05, 66 characters)</span>
+            </label>
+            <input
+              type="text"
+              value={mercurioId}
+              onChange={(e) => setMercurioId(e.target.value)}
+              placeholder="05..."
+              className="w-full px-4 py-3 bg-white/5 border border-white/10 rounded-xl text-white placeholder-gray-500 focus:outline-none focus:border-primary transition-colors font-mono text-sm"
+            />
           </div>
 
           <div>
@@ -91,8 +113,9 @@ export default function AddContactPage() {
               type="text"
               value={displayName}
               onChange={(e) => setDisplayName(e.target.value)}
-              placeholder="e.g., John from work"
+              placeholder="e.g., Alice"
               className="w-full px-4 py-3 bg-white/5 border border-white/10 rounded-xl text-white placeholder-gray-500 focus:outline-none focus:border-primary transition-colors"
+              onKeyPress={(e) => e.key === 'Enter' && handleAddContact()}
             />
           </div>
 
@@ -102,9 +125,15 @@ export default function AddContactPage() {
             </div>
           )}
 
+          <div className="bg-white/5 border border-white/10 rounded-xl p-4">
+            <p className="text-xs text-gray-400">
+              💡 Ask the other person to open <strong className="text-gray-300">Settings → Show My QR Code</strong> to find their Mercurio ID.
+            </p>
+          </div>
+
           <button
             onClick={handleAddContact}
-            disabled={isAdding || !mercurioId || !displayName}
+            disabled={isAdding || !mercurioId.trim() || !displayName.trim()}
             className="w-full py-4 px-6 font-semibold text-black gradient-bg rounded-xl hover:opacity-90 transition-opacity disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
           >
             {isAdding ? (
@@ -116,7 +145,7 @@ export default function AddContactPage() {
                 Adding...
               </>
             ) : (
-              'Add Contact'
+              'Add Contact & Open Chat'
             )}
           </button>
 

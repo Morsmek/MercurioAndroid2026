@@ -3,7 +3,7 @@
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { cryptoService } from '@/lib/crypto';
-import { uploadUserPublicKeys } from '@/lib/supabase';
+import { uploadUserPublicKeys } from '@/lib/api';
 
 export default function RestorePage() {
   const router = useRouter();
@@ -59,7 +59,7 @@ export default function RestorePage() {
             <textarea
               value={phrase}
               onChange={(e) => setPhrase(e.target.value)}
-              placeholder="word1 word2 word3..."
+              placeholder="word1 word2 word3 word4 word5 word6 word7 word8 word9 word10 word11 word12"
               rows={4}
               className="w-full px-4 py-3 bg-white/5 border border-white/10 rounded-xl text-white placeholder-gray-500 focus:outline-none focus:border-primary transition-colors"
             />

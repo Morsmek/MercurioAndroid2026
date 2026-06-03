@@ -12,6 +12,7 @@ export default function QRCodePage() {
 
   useEffect(() => {
     const generateQR = async () => {
+      await cryptoService.ensureLoaded();
       const id = cryptoService.getMercurioId();
       if (!id) {
         router.push('/welcome');

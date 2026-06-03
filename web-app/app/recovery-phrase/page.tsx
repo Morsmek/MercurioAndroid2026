@@ -12,6 +12,7 @@ export default function RecoveryPhrasePage() {
 
   useEffect(() => {
     const loadPhrase = async () => {
+      await cryptoService.ensureLoaded();
       const recoveryPhrase = cryptoService.getRecoveryPhrase();
       if (!recoveryPhrase) {
         router.push('/welcome');
